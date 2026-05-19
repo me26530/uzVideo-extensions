@@ -1,9 +1,9 @@
 // ignore
 //@name:精准集数弹幕
-//@version:2
+//@version:3
 //@type:400
-//@remark:精准识别播放集数；API健康检查和失败跳过；英文/罗马音标题清洗；弹幕数量校验；匹配信息提示
-//@env:精准弹幕API##可选，兼容 dandanPlay API。格式：线路名@https://api.example.com|线路2@https://api2.example.com&&最小弹幕数量##可选，默认 1
+//@remark:严格符合 danMu type:400；修复匹配提示刷屏；精准识别播放集数；API健康检查和失败跳过
+//@env:精准弹幕API##可选，兼容 dandanPlay API。格式：线路名@https://api.example.com|线路2@https://api2.example.com&&最小弹幕数量##可选，默认 1&&显示匹配提示##调试用，1显示，0不显示，默认0
 //@order:A00
 //@isAV:0
 //@deprecated:0
@@ -16,11 +16,13 @@
  * - getVideoList(args) 返回 formatBackData({ data: DanVideo[], error: string })
  * - getVideoEpisodes(args) 返回 formatBackData({ data: DanEpisode[], error: string })
  * - searchDanMu(item) 返回 formatBackData(BackData)，BackData.data 为 DanMu[]
- * - 不使用 import/export；仅调用 uz 运行时内置 req、formatBackData、getEnv、kLocale
+ * - 不使用 import/export
+ * - 仅调用 uz 运行时内置 req、formatBackData、getEnv、kLocale
  */
 
 const appConfig = {
     _uzTag: '',
+
     /**
      * 扩展标识，初次加载时，uz 会自动赋值，请勿修改
      * 用于读取环境变量
@@ -28,6 +30,7 @@ const appConfig = {
     get uzTag() {
         return this._uzTag
     },
+
     set uzTag(value) {
         this._uzTag = value
     },
@@ -35,23 +38,38 @@ const appConfig = {
 
 class DanMu {
     constructor() {
-        /** 弹幕内容 */
+        /**
+         * 弹幕内容
+         * @type {string}
+         */
         this.content = ''
 
-        /** 弹幕出现时间，单位秒 */
+        /**
+         * 弹幕出现时间，单位秒
+         * @type {number}
+         */
         this.time = 0
 
-        /** 弹幕颜色，支持 10 进制 / 16 进制 */
+        /**
+         * 弹幕颜色，支持 10 进制 / 16 进制
+         * @type {string}
+         */
         this.color = ''
     }
 }
 
 class BackData {
     constructor() {
-        /** @type {DanMu[]} */
+        /**
+         * 弹幕数据
+         * @type {DanMu[]}
+         */
         this.data = []
 
-        /** 错误信息 */
+        /**
+         * 错误信息
+         * @type {string}
+         */
         this.error = ''
     }
 }
@@ -136,6 +154,31 @@ function safeGetEnv(key) {
 function getMinDanmuCount() {
     const n = toNumberSafe(safeGetEnv('最小弹幕数量'))
     return n || 1
+}
+
+/**
+ * 是否显示匹配提示弹幕
+ * 默认不显示，避免播放画面被提示文字刷乱
+ */
+function shouldShowMatchTip() {
+    const v = safeGetEnv('显示匹配提示')
+    return v === '1' || v === 'true' || v === '是'
+}
+
+/**
+ * 限制提示内容长度，避免弹幕层异常
+ */
+function makeSafeMatchTip(info) {
+    info = normalizeText(info)
+        .replace(/\s+/g, ' ')
+        .replace(/[<>]/g, '')
+        .trim()
+
+    if (info.length > 60) {
+        info = info.substring(0, 60) + '...'
+    }
+
+    return info
 }
 
 function chineseNumberToInt(str) {
@@ -260,6 +303,10 @@ function parseSeasonEpisode(text) {
     return result
 }
 
+/**
+ * 从播放 URL 中解析集数
+ * 注意：这里已经修复之前导致 SyntaxError 的错误正则
+ */
 function parseEpisodeFromUrl(url) {
     url = safeDecodeURIComponent(normalizeText(url))
     if (!url) return null
@@ -369,15 +416,18 @@ function pickEpisodeInfo(item) {
 
         if (typeof ep === 'string') {
             const parsed = parseSeasonEpisode(ep)
+
             info.episode = parsed.episode
             info.season = parsed.season
             info.episodeTitle = ep
             info.source = 'danEpisode_string'
             info.confidence = parsed.episode ? 100 : 0
+
             return info
         }
 
         const ext = ep.extData || ep.raw || {}
+
         info.episodeId = normalizeText(ext.episodeId || ep.episodeId || ep.id || '')
 
         const epTitle = normalizeText(
@@ -537,11 +587,15 @@ function parseDandanPlayComments(comments) {
     return list
 }
 
+/**
+ * 创建调试提示弹幕
+ * 默认不会调用，只有 显示匹配提示=1 时才显示
+ */
 function createMatchInfoDanMu(info) {
     const danMu = new DanMu()
     danMu.time = 0.1
     danMu.color = '16776960'
-    danMu.content = `匹配信息：${info}`
+    danMu.content = `匹配：${makeSafeMatchTip(info)}`
     return danMu
 }
 
@@ -583,7 +637,8 @@ async function searchEpisodesByApi(api, animeName, episode) {
 }
 
 async function getCommentsByApi(api, episodeId) {
-    const isSimplified = normalizeText(kLocale).indexOf('CN') !== -1
+    const locale = typeof kLocale !== 'undefined' ? normalizeText(kLocale) : ''
+    const isSimplified = locale.indexOf('CN') !== -1
 
     const url = buildApiUrl(
         api,
@@ -690,7 +745,10 @@ async function getVideoList(args) {
                 }
 
                 // 平台优先：第一个可用平台有结果就停止，避免不同平台结果混杂
-                if (normalizeText(args?.videoPlatformName) === '平台优先' || !normalizeText(args?.videoPlatformName)) {
+                if (
+                    normalizeText(args?.videoPlatformName) === '平台优先' ||
+                    !normalizeText(args?.videoPlatformName)
+                ) {
                     break
                 }
             } catch (error) {
@@ -777,7 +835,12 @@ async function searchDanMu(item) {
 
         if (!epInfo.episode && !epInfo.episodeId) {
             backData.error = '未识别到播放集数，请手动选择剧集'
-            backData.data.push(createMatchInfoDanMu(`失败；原因=未识别集数；标题=${epInfo.clickedTitle || ''}`))
+
+            // 默认不把提示塞进弹幕层，避免播放画面被提示文字刷乱
+            if (shouldShowMatchTip()) {
+                backData.data.push(createMatchInfoDanMu(`未识别集数：${epInfo.clickedTitle || ''}`))
+            }
+
             return formatBackData(backData)
         }
 
@@ -788,11 +851,12 @@ async function searchDanMu(item) {
         backData.error = error.toString()
     }
 
-    if (lastInfo) {
+    // 默认不显示匹配信息弹幕；只有调试时才显示短提示
+    if (lastInfo && shouldShowMatchTip()) {
         backData.data.unshift(createMatchInfoDanMu(lastInfo))
     }
 
-    const realCount = Math.max(0, backData.data.length - (lastInfo ? 1 : 0))
+    const realCount = Math.max(0, backData.data.length - (lastInfo && shouldShowMatchTip() ? 1 : 0))
 
     if (realCount === 0 && !backData.error) {
         backData.error = '未找到弹幕'
