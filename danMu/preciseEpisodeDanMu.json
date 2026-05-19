@@ -5,7 +5,7 @@
     "url": "https://raw.githubusercontent.com/me26530/uzVideo-extensions/refs/heads/main/danMu/js/PreciseEpisodeDanMu.js",
     "env": "精准弹幕API##可选，兼容 dandanPlay API。格式：线路名@https://api.example.com|线路2@https://api2.example.com&&最小弹幕数量##可选，默认 1",
     "remark": "严格符合 danMu type:400；精准识别播放集数；API健康检查和失败跳过；英文/罗马音标题清洗；弹幕数量校验；匹配信息提示",
-    "version": 7,
+    "version": 8,
     "type": 400
   }
 ]
