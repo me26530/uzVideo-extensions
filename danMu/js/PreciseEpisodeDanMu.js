@@ -2,7 +2,7 @@
 //@name:精准集数弹幕
 //@version:3
 //@type:400
-//@remark:精准识别播放集数；环境变量API优先覆盖内置；API健康检查和失败跳过；英文/罗马音标题清洗；弹幕数量校验；匹配信息提示
+//@remark:精准识别播放集数；环境变量API优先覆盖内置；修复JSC正则安装错误；显示实际API地址；弹幕数量校验；匹配信息提示
 //@env:精准弹幕API##可选，兼容 dandanPlay API。格式：线路名@https://api.example.com|线路2@https://api2.example.com&&最小弹幕数量##可选，默认 1
 //@order:A00
 //@isAV:0
@@ -21,10 +21,6 @@
 
 const appConfig = {
     _uzTag: '',
-    /**
-     * 扩展标识，初次加载时，uz 会自动赋值，请勿修改
-     * 用于读取环境变量
-     */
     get uzTag() {
         return this._uzTag
     },
@@ -35,18 +31,14 @@ const appConfig = {
 
 class DanMu {
     constructor() {
-        /** 弹幕内容 */
         this.content = ''
-        /** 弹幕出现时间，单位秒 */
         this.time = 0
-        /** 弹幕颜色，支持 10 进制 / 16 进制 */
         this.color = ''
     }
 }
 
 class BackData {
     constructor() {
-        /** @type {DanMu[]} */
         this.data = []
         this.error = ''
     }
@@ -97,7 +89,8 @@ function toNumberSafe(value) {
 
 function getField(obj, keys) {
     if (!obj) return ''
-    for (const key of keys) {
+    for (let i = 0; i < keys.length; i++) {
+        const key = keys[i]
         const value = obj[key]
         if (value !== undefined && value !== null && value !== '') return value
     }
@@ -154,7 +147,8 @@ function chineseNumberToInt(str) {
         return tens * 10 + ones
     }
 
-    return map[str] ?? null
+    if (map[str] !== undefined) return map[str]
+    return null
 }
 
 function parseEpisodeNumber(text) {
@@ -170,17 +164,19 @@ function parseEpisodeNumber(text) {
         /(?:^|\s)(\d{1,4})(?:\s|$)/,
     ]
 
-    for (const reg of patterns) {
-        const m = text.match(reg)
+    for (let i = 0; i < patterns.length; i++) {
+        const m = text.match(patterns[i])
         if (!m) continue
         const n = /^\d+$/.test(m[1]) ? Number(m[1]) : chineseNumberToInt(m[1])
         if (n && n > 0 && n < 3000) return n
     }
+
     return null
 }
 
 function parseSeasonEpisode(text) {
     text = normalizeText(text)
+
     const result = {
         season: null,
         episode: null,
@@ -188,13 +184,14 @@ function parseSeasonEpisode(text) {
         source: '',
         confidence: 0,
     }
+
     if (!text) return result
 
     let m = text.match(/S\s*(\d{1,2})\s*E\s*(\d{1,4})/i)
     if (m) {
         result.season = toNumberSafe(m[1])
         result.episode = toNumberSafe(m[2])
-        result.episodeTitle = `第${result.episode}集`
+        result.episodeTitle = '第' + result.episode + '集'
         result.source = 'SxxExx'
         result.confidence = 95
         return result
@@ -204,7 +201,7 @@ function parseSeasonEpisode(text) {
     if (m) {
         result.season = toNumberSafe(m[1])
         result.episode = toNumberSafe(m[2])
-        result.episodeTitle = `第${result.episode}集`
+        result.episodeTitle = '第' + result.episode + '集'
         result.source = 'season_episode_number'
         result.confidence = 95
         return result
@@ -214,7 +211,7 @@ function parseSeasonEpisode(text) {
     if (m) {
         result.season = chineseNumberToInt(m[1])
         result.episode = chineseNumberToInt(m[2])
-        result.episodeTitle = `第${result.episode}集`
+        result.episodeTitle = '第' + result.episode + '集'
         result.source = 'season_episode_cn'
         result.confidence = 95
         return result
@@ -223,10 +220,11 @@ function parseSeasonEpisode(text) {
     const ep = parseEpisodeNumber(text)
     if (ep) {
         result.episode = ep
-        result.episodeTitle = `第${ep}集`
+        result.episodeTitle = '第' + ep + '集'
         result.source = 'episode_only'
         result.confidence = 70
     }
+
     return result
 }
 
@@ -242,15 +240,21 @@ function parseEpisodeFromUrl(url) {
         /第\s*(\d{1,4})\s*[集话話回]/,
     ]
 
-    for (const reg of patterns) {
-        const m = url.match(reg)
+    for (let i = 0; i < patterns.length; i++) {
+        const m = url.match(patterns[i])
         if (!m) continue
         const n = toNumberSafe(m[1])
         if (n) return n
     }
+
     return null
 }
 
+/**
+ * JSC兼容版标题清洗：
+ * 避免使用复杂括号集合，例如 /[$$【(（].*?[$$】)）]/g
+ * 部分运行时会报 SyntaxError: nothing to repeat
+ */
 function cleanEnglishRomanTitle(title) {
     title = normalizeText(title)
     if (!title) return ''
@@ -258,12 +262,36 @@ function cleanEnglishRomanTitle(title) {
     return title
         .replace(/\bS\s*\d{1,2}\s*E\s*\d{1,4}\b/gi, '')
         .replace(/\bSeason\s*\d{1,2}\b/gi, '')
-        .replace(/\b(?:EP|Ep|Episode)\s*\.?\s*\d{1,4}\b/gi, '')
-        .replace(/\b(?:OVA|OAD|SP|Special|Trailer|Preview|PV)\s*\d*\b/gi, '')
-        .replace(/\b(?:1080p|720p|2160p|4K|HEVC|H265|H264|x264|x265|WEB[- ]?DL|WEBRip|BDRip|BluRay|Baha|CR|AMZN|NF)\b/gi, '')
+        .replace(/\bEP\s*\.?\s*\d{1,4}\b/gi, '')
+        .replace(/\bEpisode\s*\.?\s*\d{1,4}\b/gi, '')
+        .replace(/\bOVA\s*\d*\b/gi, '')
+        .replace(/\bOAD\s*\d*\b/gi, '')
+        .replace(/\bSP\s*\d*\b/gi, '')
+        .replace(/\bSpecial\s*\d*\b/gi, '')
+        .replace(/\bTrailer\s*\d*\b/gi, '')
+        .replace(/\bPreview\s*\d*\b/gi, '')
+        .replace(/\bPV\s*\d*\b/gi, '')
+        .replace(/\b1080p\b/gi, '')
+        .replace(/\b720p\b/gi, '')
+        .replace(/\b2160p\b/gi, '')
+        .replace(/\b4K\b/gi, '')
+        .replace(/\bHEVC\b/gi, '')
+        .replace(/\bH265\b/gi, '')
+        .replace(/\bH264\b/gi, '')
+        .replace(/\bx264\b/gi, '')
+        .replace(/\bx265\b/gi, '')
+        .replace(/\bWEB[- ]?DL\b/gi, '')
+        .replace(/\bWEBRip\b/gi, '')
+        .replace(/\bBDRip\b/gi, '')
+        .replace(/\bBluRay\b/gi, '')
+        .replace(/\bBaha\b/gi, '')
+        .replace(/\bCR\b/gi, '')
+        .replace(/\bAMZN\b/gi, '')
+        .replace(/\bNF\b/gi, '')
         .replace(/$$[^$$]*\]/g, '')
         .replace(/【[^】]*】/g, '')
         .replace(/$$[^)]*$$/g, '')
+        .replace(/（[^）]*）/g, '')
         .replace(/[._-]+/g, ' ')
         .replace(/\s+/g, ' ')
         .trim()
@@ -271,13 +299,19 @@ function cleanEnglishRomanTitle(title) {
 
 function cleanClickedTitle(title) {
     title = normalizeText(title)
+    if (!title) return ''
+
     const cnClean = title
         .replace(/S\s*\d{1,2}\s*E\s*\d{1,4}/gi, '')
         .replace(/第\s*[零〇一二两三四五六七八九十百\d]+\s*[季部]/g, '')
         .replace(/第\s*[零〇一二两三四五六七八九十百\d]+\s*[集话話回]/g, '')
-        .replace(/(?:EP|Episode)\s*\.?\s*\d{1,4}/gi, '')
+        .replace(/EP\s*\.?\s*\d{1,4}/gi, '')
+        .replace(/Episode\s*\.?\s*\d{1,4}/gi, '')
         .replace(/更新至\s*\d{1,4}\s*[集话話回]/g, '')
-        .replace(/[$$【(（].*?[$$】)）]/g, '')
+        .replace(/$$[^$$]*\]/g, '')
+        .replace(/【[^】]*】/g, '')
+        .replace(/$$[^)]*$$/g, '')
+        .replace(/（[^）]*）/g, '')
         .replace(/\s+/g, ' ')
         .trim()
 
@@ -286,7 +320,8 @@ function cleanClickedTitle(title) {
 
 function buildTitleCandidates(epInfo) {
     const list = []
-    const push = (v) => {
+
+    const push = function (v) {
         v = normalizeText(v)
         if (v && list.indexOf(v) < 0) list.push(v)
     }
@@ -302,7 +337,6 @@ function buildTitleCandidates(epInfo) {
 function pickEpisodeInfo(item) {
     const p = item || {}
 
-    // 标题锚点：只取播放/点击传入的 name/title，不用辅助标题覆盖
     const clickedTitle = normalizeText(getField(p, ['name', 'title', 'videoName', 'vodName']))
 
     const titleText = [
@@ -318,7 +352,7 @@ function pickEpisodeInfo(item) {
         .join(' ')
 
     const info = {
-        clickedTitle,
+        clickedTitle: clickedTitle,
         cleanTitle: cleanClickedTitle(clickedTitle),
         season: null,
         episode: null,
@@ -329,7 +363,6 @@ function pickEpisodeInfo(item) {
         confidence: 0,
     }
 
-    // 1. 用户手动选择剧集：最高优先级
     if (p.danEpisode) {
         const ep = p.danEpisode
 
@@ -344,7 +377,6 @@ function pickEpisodeInfo(item) {
         }
 
         const ext = ep.extData || ep.raw || {}
-
         info.episodeId = normalizeText(ext.episodeId || ep.episodeId || ep.id || '')
 
         const epTitle = normalizeText(
@@ -362,42 +394,39 @@ function pickEpisodeInfo(item) {
 
         info.episode = epNum
         info.season = toNumberSafe(ext.season) || toNumberSafe(ep.season) || null
-        info.episodeTitle = epTitle || (epNum ? `第${epNum}集` : '')
+        info.episodeTitle = epTitle || (epNum ? '第' + epNum + '集' : '')
         info.videoUrl = normalizeText(ep.url || ep.videoUrl || ext.url || info.videoUrl)
         info.source = 'danEpisode_object'
         info.confidence = epNum || info.episodeId ? 100 : 0
         return info
     }
 
-    // 2. 播放器直接传入 episode
     if (p.episode !== undefined && p.episode !== null && p.episode !== '') {
         const epNum = toNumberSafe(p.episode) || parseEpisodeNumber(p.episode)
         if (epNum) {
             info.episode = epNum
-            info.episodeTitle = `第${epNum}集`
+            info.episodeTitle = '第' + epNum + '集'
             info.source = 'searchParameters.episode'
             info.confidence = 95
             return info
         }
     }
 
-    // 3. 从 videoUrl 中提取明确集数
     const epFromUrl = parseEpisodeFromUrl(info.videoUrl)
     if (epFromUrl) {
         info.episode = epFromUrl
-        info.episodeTitle = `第${epFromUrl}集`
+        info.episodeTitle = '第' + epFromUrl + '集'
         info.source = 'videoUrl'
         info.confidence = 80
         return info
     }
 
-    // 4. 标题兜底：支持 S01E02 / 第2季第10集 / 第10集
     const parsed = parseSeasonEpisode(titleText)
     if (parsed.episode) {
         info.season = parsed.season
         info.episode = parsed.episode
         info.episodeTitle = parsed.episodeTitle
-        info.source = `title:${parsed.source}`
+        info.source = 'title:' + parsed.source
         info.confidence = parsed.confidence
         return info
     }
@@ -428,7 +457,9 @@ function parseCustomApis() {
 
     const parts = env
         .split(/[|;]/)
-        .map((x) => x.trim())
+        .map(function (x) {
+            return x.trim()
+        })
         .filter(Boolean)
 
     for (let i = 0; i < parts.length; i++) {
@@ -438,8 +469,8 @@ function parseCustomApis() {
             const base = normalizeApiBase(arr.join('@'))
             if (name && base) {
                 result.push({
-                    name,
-                    base,
+                    name: name,
+                    base: base,
                     builtin: false,
                 })
             }
@@ -450,10 +481,8 @@ function parseCustomApis() {
 }
 
 /**
- * 关键修正版：
- * 1. 环境变量 API 优先。
- * 2. 如果环境变量里存在同名线路，例如 dandanPlay@自定义地址，则覆盖内置 dandanPlay。
- * 3. 如果 UI 选择了某个线路，则把该线路排到最前。
+ * 环境变量 API 优先：
+ * 如果环境变量存在 dandanPlay@自定义地址，则覆盖内置 dandanPlay。
  */
 function getApiConfigs(preferredName) {
     const customApis = parseCustomApis()
@@ -466,9 +495,11 @@ function getApiConfigs(preferredName) {
         },
     ]
 
-    const customNames = customApis.map((x) => x.name)
+    const customNames = customApis.map(function (x) {
+        return x.name
+    })
 
-    const filteredBuiltinApis = builtinApis.filter((x) => {
+    const filteredBuiltinApis = builtinApis.filter(function (x) {
         return customNames.indexOf(x.name) < 0
     })
 
@@ -476,19 +507,14 @@ function getApiConfigs(preferredName) {
 
     preferredName = normalizeText(preferredName)
 
-    if (!preferredName || preferredName === '平台优先') {
-        return apis
-    }
+    if (!preferredName || preferredName === '平台优先') return apis
 
     const selected = []
     const others = []
 
     for (let i = 0; i < apis.length; i++) {
-        if (apis[i].name === preferredName) {
-            selected.push(apis[i])
-        } else {
-            others.push(apis[i])
-        }
+        if (apis[i].name === preferredName) selected.push(apis[i])
+        else others.push(apis[i])
     }
 
     return selected.concat(others)
@@ -499,7 +525,7 @@ function parseDandanPlayComments(comments) {
     if (!comments || comments.length === 0) return list
 
     for (let index = 0; index < comments.length; index++) {
-        const element = comments[index]
+        const element = comments[index] || {}
         const params = normalizeText(element.p).split(',')
 
         const danMu = new DanMu()
@@ -507,9 +533,7 @@ function parseDandanPlayComments(comments) {
         danMu.time = Number(params[0] || element.time || 0)
         danMu.color = params[2] || element.color || ''
 
-        if (danMu.content) {
-            list.push(danMu)
-        }
+        if (danMu.content) list.push(danMu)
     }
 
     return list
@@ -519,19 +543,16 @@ function createMatchInfoDanMu(info) {
     const danMu = new DanMu()
     danMu.time = 0.1
     danMu.color = '16776960'
-    danMu.content = `匹配信息：${info}`
+    danMu.content = '匹配信息：' + info
     return danMu
 }
 
 function formatEpisodeTitle(item, index) {
+    item = item || {}
+
     const rawTitle = normalizeText(item.episodeTitle || item.title || item.name)
-
-    const epNum =
-        toNumberSafe(item.episode) ||
-        toNumberSafe(item.episodeNumber) ||
-        parseEpisodeNumber(rawTitle)
-
-    const epPrefix = epNum ? `第${epNum}集` : `剧集${index + 1}`
+    const epNum = toNumberSafe(item.episode) || toNumberSafe(item.episodeNumber) || parseEpisodeNumber(rawTitle)
+    const epPrefix = epNum ? '第' + epNum + '集' : '剧集' + (index + 1)
 
     const cleanTitle = rawTitle
         .replace(/^第\s*[零〇一二两三四五六七八九十百\d]+\s*[集话話回]\s*[-:：]?\s*/g, '')
@@ -539,11 +560,8 @@ function formatEpisodeTitle(item, index) {
 
     const airDate = normalizeText(item.airDate || item.airdate || item.date)
 
-    let title = cleanTitle && cleanTitle !== epPrefix ? `${epPrefix} - ${cleanTitle}` : epPrefix
-
-    if (airDate) {
-        title += ` (${airDate})`
-    }
+    let title = cleanTitle && cleanTitle !== epPrefix ? epPrefix + ' - ' + cleanTitle : epPrefix
+    if (airDate) title += ' (' + airDate + ')'
 
     return title
 }
@@ -555,17 +573,18 @@ async function searchEpisodesByApi(api, animeName, episode) {
     return await req(url, {
         queryParameters: {
             anime: animeName,
-            episode: episode ? `${episode}` : '',
+            episode: episode ? String(episode) : '',
         },
     })
 }
 
 async function getCommentsByApi(api, episodeId) {
-    const isSimplified = normalizeText(kLocale).indexOf('CN') !== -1
+    const locale = typeof kLocale === 'undefined' ? '' : normalizeText(kLocale)
+    const isSimplified = locale.indexOf('CN') !== -1
 
     const url = buildApiUrl(
         api,
-        `/api/v2/comment/${episodeId}?withRelated=true&chConvert=${isSimplified ? '1' : '2'}`
+        '/api/v2/comment/' + episodeId + '?withRelated=true&chConvert=' + (isSimplified ? '1' : '2')
     )
 
     if (!url) return null
@@ -574,7 +593,9 @@ async function getCommentsByApi(api, episodeId) {
 }
 
 async function getLines() {
-    const apiNames = getApiConfigs('').map((x) => x.name)
+    const apiNames = getApiConfigs('').map(function (x) {
+        return x.name
+    })
 
     return formatBackData({
         lines: apiNames,
@@ -600,7 +621,7 @@ async function getVideoPlatformList() {
     }
 
     return formatBackData({
-        data,
+        data: data,
         error: '',
     })
 }
@@ -614,22 +635,22 @@ async function getVideoList(args) {
     const errors = []
 
     try {
-        const keyword = normalizeText(args?.name || args?.title || args?.keyword || '')
+        args = args || {}
+
+        const keyword = normalizeText(args.name || args.title || args.keyword || '')
 
         if (!keyword) {
             backData.error = '缺少搜索标题'
             return formatBackData(backData)
         }
 
-        const apis = getApiConfigs(args?.videoPlatformName)
+        const apis = getApiConfigs(args.videoPlatformName)
 
-        const titleCandidates = [
-            keyword,
-            cleanClickedTitle(keyword),
-            cleanEnglishRomanTitle(keyword),
-        ]
+        const titleCandidates = [keyword, cleanClickedTitle(keyword), cleanEnglishRomanTitle(keyword)]
             .filter(Boolean)
-            .filter((v, i, a) => a.indexOf(v) === i)
+            .filter(function (v, i, a) {
+                return a.indexOf(v) === i
+            })
 
         for (let i = 0; i < apis.length; i++) {
             const api = apis[i]
@@ -639,38 +660,27 @@ async function getVideoList(args) {
 
                 for (let t = 0; t < titleCandidates.length && found.length === 0; t++) {
                     const searchResult = await searchEpisodesByApi(api, titleCandidates[t], '')
-                    found = searchResult?.data?.animes || []
+                    found = searchResult && searchResult.data && searchResult.data.animes ? searchResult.data.animes : []
                 }
 
-                if (found.length === 0) {
-                    continue
-                }
+                if (found.length === 0) continue
 
                 for (let j = 0; j < found.length; j++) {
-                    const anime = found[j]
+                    const anime = found[j] || {}
 
                     const video = new DanVideo()
                     video.vod_name = anime.animeTitle || anime.title || anime.name || keyword
-                    video.vod_remarks = `${api.name}${anime.type ? ' · ' + anime.type : ''}`
-
-                    video.extData = {
-                        ...anime,
-                        apiName: api.name,
-                        apiBase: api.base,
-                    }
+                    video.vod_remarks = api.name + '@' + api.base + (anime.type ? ' · ' + anime.type : '')
+                    video.extData = copyObject(anime)
+                    video.extData.apiName = api.name
+                    video.extData.apiBase = api.base
 
                     backData.data.push(video)
                 }
 
-                // 平台优先：第一个可用平台有结果就停止，避免不同平台结果混杂
-                if (
-                    normalizeText(args?.videoPlatformName) === '平台优先' ||
-                    !normalizeText(args?.videoPlatformName)
-                ) {
-                    break
-                }
+                if (normalizeText(args.videoPlatformName) === '平台优先' || !normalizeText(args.videoPlatformName)) break
             } catch (error) {
-                errors.push(`${api.name}@${api.base}: ${error.toString()}`)
+                errors.push(api.name + '@' + api.base + ': ' + error.toString())
                 continue
             }
         }
@@ -692,14 +702,16 @@ async function getVideoEpisodes(args) {
     }
 
     try {
-        const danVideo = args?.danVideo || {}
+        args = args || {}
+
+        const danVideo = args.danVideo || {}
         const ext = danVideo.extData || danVideo.raw || danVideo
         const episodes = ext.episodes || []
 
         for (let i = 0; i < episodes.length; i++) {
-            const item = episodes[i]
-
+            const item = episodes[i] || {}
             const episode = new DanEpisode()
+
             const friendlyTitle = formatEpisodeTitle(item, i)
 
             const epNum =
@@ -709,22 +721,16 @@ async function getVideoEpisodes(args) {
 
             episode.vod_name = friendlyTitle
 
-            episode.vod_remarks = [
-                ext.apiName || '',
-                item.type || '',
-                item.duration ? `${item.duration}` : '',
-            ]
+            episode.vod_remarks = [ext.apiName || '', item.type || '', item.duration ? String(item.duration) : '']
                 .filter(Boolean)
                 .join(' · ')
 
-            episode.extData = {
-                ...item,
-                apiName: ext.apiName || '',
-                apiBase: ext.apiBase || '',
-                episode: epNum,
-                episodeId: item.episodeId || item.id || '',
-                episodeTitle: friendlyTitle,
-            }
+            episode.extData = copyObject(item)
+            episode.extData.apiName = ext.apiName || ''
+            episode.extData.apiBase = ext.apiBase || ''
+            episode.extData.episode = epNum
+            episode.extData.episodeId = item.episodeId || item.id || ''
+            episode.extData.episodeTitle = friendlyTitle
 
             backData.data.push(episode)
         }
@@ -750,9 +756,7 @@ async function searchDanMu(item) {
 
         if (!epInfo.episode && !epInfo.episodeId) {
             backData.error = '未识别到播放集数，请手动选择剧集'
-            backData.data.push(
-                createMatchInfoDanMu(`失败；原因=未识别集数；标题=${epInfo.clickedTitle || ''}`)
-            )
+            backData.data.push(createMatchInfoDanMu('失败；原因=未识别集数；标题=' + (epInfo.clickedTitle || '')))
             return formatBackData(backData)
         }
 
@@ -778,16 +782,19 @@ async function searchDanMu(item) {
 
 async function searchByApis(titleCandidates, epInfo, item) {
     const minCount = getMinDanmuCount()
-    const apis = getApiConfigs(item?.videoPlatformName || item?.line)
-    const errors = []
+    item = item || {}
 
+    const apis = getApiConfigs(item.videoPlatformName || item.line)
+
+    const errors = []
     let lastTried = ''
 
-    // 手动选集如果已经带 episodeId 和 api 信息，则把对应 API 提到最前面
-    const manualApiName = normalizeText(item?.danEpisode?.extData?.apiName)
+    const danEpisode = item.danEpisode || {}
+    const danEpisodeExt = danEpisode.extData || {}
+    const manualApiName = normalizeText(danEpisodeExt.apiName)
 
     if (manualApiName) {
-        apis.sort((a, b) => {
+        apis.sort(function (a, b) {
             if (a.name === manualApiName) return -1
             if (b.name === manualApiName) return 1
             return 0
@@ -801,7 +808,6 @@ async function searchByApis(titleCandidates, epInfo, item) {
             let episodeId = epInfo.episodeId
             let matchedTitle = titleCandidates[0]
 
-            // API 健康检查 + 搜索合并：请求失败就跳过当前 API
             if (!episodeId) {
                 let animes = []
 
@@ -809,49 +815,102 @@ async function searchByApis(titleCandidates, epInfo, item) {
                     matchedTitle = titleCandidates[t]
 
                     const searchResult = await searchEpisodesByApi(api, matchedTitle, epInfo.episode)
-                    animes = searchResult?.data?.animes || []
+
+                    animes =
+                        searchResult && searchResult.data && searchResult.data.animes
+                            ? searchResult.data.animes
+                            : []
                 }
 
                 if (animes.length === 0 || !animes[0].episodes || animes[0].episodes.length === 0) {
-                    lastTried = `${api.name}@${api.base}/${matchedTitle}/第${epInfo.episode || ''}集：无搜索结果`
+                    lastTried =
+                        api.name +
+                        '@' +
+                        api.base +
+                        '/' +
+                        matchedTitle +
+                        '/第' +
+                        (epInfo.episode || '') +
+                        '集：无搜索结果'
                     continue
                 }
 
-                episodeId = animes[0].episodes[0].episodeId
+                episodeId = animes[0].episodes[0].episodeId || animes[0].episodes[0].id || ''
             }
 
             if (!episodeId) {
-                lastTried = `${api.name}@${api.base}/${matchedTitle}：无 episodeId`
+                lastTried = api.name + '@' + api.base + '/' + matchedTitle + '：无 episodeId'
                 continue
             }
 
             const danMuResult = await getCommentsByApi(api, episodeId)
-            const comments = danMuResult?.data?.comments || []
+            const comments =
+                danMuResult && danMuResult.data && danMuResult.data.comments
+                    ? danMuResult.data.comments
+                    : []
+
             const list = parseDandanPlayComments(comments)
 
-            // 返回弹幕数量校验：数量不足认为本次匹配无效，继续跳下一个 API
             if (list.length < minCount) {
-                lastTried = `${api.name}@${api.base}/${matchedTitle}/episodeId=${episodeId}：弹幕数 ${list.length} 小于阈值 ${minCount}`
+                lastTried =
+                    api.name +
+                    '@' +
+                    api.base +
+                    '/' +
+                    matchedTitle +
+                    '/episodeId=' +
+                    episodeId +
+                    '：弹幕数 ' +
+                    list.length +
+                    ' 小于阈值 ' +
+                    minCount
                 continue
             }
 
             return {
-                list,
-                info: `成功；平台=${api.name}；API=${api.base}；标题=${matchedTitle}；集数=${epInfo.episode || ''}；来源=${epInfo.source}；episodeId=${episodeId}；弹幕=${list.length}`,
+                list: list,
+                info:
+                    '成功；平台=' +
+                    api.name +
+                    '；API=' +
+                    api.base +
+                    '；标题=' +
+                    matchedTitle +
+                    '；集数=' +
+                    (epInfo.episode || '') +
+                    '；来源=' +
+                    epInfo.source +
+                    '；episodeId=' +
+                    episodeId +
+                    '；弹幕=' +
+                    list.length,
             }
         } catch (error) {
-            errors.push(`${api.name}@${api.base}: ${error.toString()}`)
+            errors.push(api.name + '@' + api.base + ': ' + error.toString())
             continue
         }
     }
 
     const info =
         errors.length > 0
-            ? `失败跳过；${errors.join('；')}；最后=${lastTried}`
-            : `失败；${lastTried}`
+            ? '失败跳过；' + errors.join('；') + '；最后=' + lastTried
+            : '失败；' + lastTried
 
     return {
         list: [],
-        info,
+        info: info,
     }
+}
+
+function copyObject(obj) {
+    const result = {}
+    if (!obj) return result
+
+    for (const key in obj) {
+        try {
+            result[key] = obj[key]
+        } catch (e) {}
+    }
+
+    return result
 }
