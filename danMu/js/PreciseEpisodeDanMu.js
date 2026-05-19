@@ -483,7 +483,7 @@ function getApiConfigs(preferredName) {
     const builtinApis = [
         {
             name: 'dandanPlay',
-            base: 'https://api.dandanplay.net',
+            base: 'https://5m36yzdvtmqcrkubdau5axe5lu0qrizy.lambda-url.ap-northeast-1.on.aws/1105074072',
             builtin: true,
         },
     ]
