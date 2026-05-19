@@ -1,11 +1,9 @@
-[
-  {
-    "name": "精准集数弹幕",
-    "codeID": "",
-    "url": "https://raw.githubusercontent.com/me26530/uzVideo-extensions/refs/heads/main/danMu/js/PreciseEpisodeDanMu.js",
-    "env": "精准弹幕API##可选，兼容 dandanPlay API。格式：线路名@https://api.example.com|线路2@https://api2.example.com&&最小弹幕数量##可选，默认 1",
-    "remark": "严格符合 danMu type:400；精准识别播放集数；API健康检查和失败跳过；英文/罗马音标题清洗；弹幕数量校验；匹配信息提示",
-    "version": 2,
-    "type": 400
-  }
-]
+{
+  "name": "精准集数弹幕",
+  "codeID": "",
+  "url": "https://raw.githubusercontent.com/你的用户名/uzVideo-extensions/main/danMu/js/PreciseEpisodeDanMu.js",
+  "env": "DANMU_API_BASES##弹幕API地址，多个用 || 分隔，如 https://api1/87654321||https://api2/87654321",
+  "remark": "兼容 danmu_api，自动识别季集、缺集、倒序，支持多API",
+  "version": 2,
+  "type": 400
+}
