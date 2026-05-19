@@ -1,8 +1,8 @@
 // ignore
 //@name:精准集数弹幕
-//@version:4
+//@version:5
 //@type:400
-//@remark:精准识别播放集数；环境变量API优先覆盖内置；修复JSC正则安装错误；显示实际API地址；弹幕数量校验；匹配信息提示
+//@remark:精准识别播放集数；环境变量API优先覆盖内置；修复JSC正则安装错误；显示实际API地址；弹幕数量校验；匹配信息提示；修复多结果误取第一个导致花絮/剧场版误配
 //@env:精准弹幕API##可选，兼容 dandanPlay API。格式：线路名@https://api.example.com|线路2@https://api2.example.com&&最小弹幕数量##可选，默认 1
 //@order:A00
 //@isAV:0
@@ -233,7 +233,7 @@ function parseEpisodeFromUrl(url) {
     if (!url) return null
 
     const patterns = [
-        /[?&#](?:episode|ep|e|index|nid|vidIndex|play|page=)(\d{1,4})(?:\D|$)/i,
+        /?:episode|ep|e|index|nid|vidIndex|play|page=(\d{1,4})(?:\D|$)/i,
         /\/(?:episode|episodes|ep|e)\/(\d{1,4})(?:[/?#]|$)/i,
         /(?:episode|episodes|ep|e)[-_]?(\d{1,4})(?:\D|$)/i,
         /\/(\d{1,4})\.html(?:[?#].*)?$/i,
@@ -249,7 +249,6 @@ function parseEpisodeFromUrl(url) {
 
     return null
 }
-
 
 function cleanEnglishRomanTitle(title) {
     title = normalizeText(title)
@@ -357,6 +356,8 @@ function pickEpisodeInfo(item) {
         episodeId: '',
         source: '',
         confidence: 0,
+        _matchedEpisodeTitle: '',
+        _matchedScore: 0,
     }
 
     if (p.danEpisode) {
@@ -557,6 +558,108 @@ function formatEpisodeTitle(item, index) {
     if (airDate) title += ' (' + airDate + ')'
 
     return title
+}
+
+function getAnimeTitle(anime) {
+    anime = anime || {}
+    return normalizeText(anime.animeTitle || anime.title || anime.name || '')
+}
+
+function getEpisodeIdFromItem(ep) {
+    ep = ep || {}
+    return normalizeText(ep.episodeId || ep.id || '')
+}
+
+function getEpisodeNumberFromApiItem(ep) {
+    ep = ep || {}
+
+    const title = normalizeText(ep.episodeTitle || ep.title || ep.name)
+
+    return (
+        toNumberSafe(ep.episode) ||
+        toNumberSafe(ep.episodeNumber) ||
+        toNumberSafe(ep.sort) ||
+        toNumberSafe(ep.index) ||
+        parseEpisodeNumber(title)
+    )
+}
+
+function isLikelySpecialEpisodeTitle(title) {
+    title = normalizeText(title)
+
+    return /花絮|彩蛋|预告|先导|PV|Trailer|Preview|SP|OVA|OAD|特别篇|总集篇|制作|访谈|采访|宣传|片花|番外/i.test(title)
+}
+
+function scoreAnimeTitle(anchorTitle, animeTitle) {
+    const anchor = cleanClickedTitle(anchorTitle || '')
+    const target = cleanClickedTitle(animeTitle || '')
+
+    if (!anchor || !target) return 0
+
+    if (anchor === target) return 100
+    if (target.indexOf(anchor) >= 0) return 80
+    if (anchor.indexOf(target) >= 0) return 70
+
+    return 0
+}
+
+function pickBestEpisodeFromAnimes(animes, epInfo, anchorTitle) {
+    animes = animes || []
+
+    const targetEpisode = toNumberSafe(epInfo.episode)
+    let best = null
+    let bestScore = -1
+
+    for (let i = 0; i < animes.length; i++) {
+        const anime = animes[i] || {}
+        const animeTitle = getAnimeTitle(anime)
+        const titleScore = scoreAnimeTitle(anchorTitle, animeTitle)
+
+        if (titleScore <= 0) continue
+
+        const episodes = anime.episodes || []
+
+        for (let j = 0; j < episodes.length; j++) {
+            const ep = episodes[j] || {}
+            const episodeTitle = normalizeText(ep.episodeTitle || ep.title || ep.name)
+            const episodeId = getEpisodeIdFromItem(ep)
+            const epNum = getEpisodeNumberFromApiItem(ep)
+
+            if (!episodeId) continue
+
+            let score = titleScore
+
+            if (targetEpisode) {
+                if (epNum === targetEpisode) {
+                    score += 120
+                } else {
+                    continue
+                }
+            }
+
+            if (isLikelySpecialEpisodeTitle(episodeTitle)) {
+                score -= 80
+            }
+
+            score -= i * 2
+            score -= j
+
+            if (score > bestScore) {
+                bestScore = score
+                best = {
+                    anime: anime,
+                    episode: ep,
+                    episodeId: episodeId,
+                    animeTitle: animeTitle,
+                    episodeTitle: episodeTitle,
+                    episodeNumber: epNum,
+                    score: score,
+                }
+            }
+        }
+    }
+
+    return best
 }
 
 async function searchEpisodesByApi(api, animeName, episode) {
@@ -815,7 +918,7 @@ async function searchByApis(titleCandidates, epInfo, item) {
                             : []
                 }
 
-                if (animes.length === 0 || !animes[0].episodes || animes[0].episodes.length === 0) {
+                if (animes.length === 0) {
                     lastTried =
                         api.name +
                         '@' +
@@ -828,7 +931,26 @@ async function searchByApis(titleCandidates, epInfo, item) {
                     continue
                 }
 
-                episodeId = animes[0].episodes[0].episodeId || animes[0].episodes[0].id || ''
+                const picked = pickBestEpisodeFromAnimes(animes, epInfo, titleCandidates[0])
+
+                if (!picked || !picked.episodeId) {
+                    lastTried =
+                        api.name +
+                        '@' +
+                        api.base +
+                        '/' +
+                        matchedTitle +
+                        '/第' +
+                        (epInfo.episode || '') +
+                        '集：有搜索结果但未找到精确集数，避免误配'
+                    continue
+                }
+
+                episodeId = picked.episodeId
+                matchedTitle = picked.animeTitle || matchedTitle
+
+                epInfo._matchedEpisodeTitle = picked.episodeTitle || ''
+                epInfo._matchedScore = picked.score || 0
             }
 
             if (!episodeId) {
@@ -873,6 +995,10 @@ async function searchByApis(titleCandidates, epInfo, item) {
                     (epInfo.episode || '') +
                     '；来源=' +
                     epInfo.source +
+                    '；匹配集标题=' +
+                    (epInfo._matchedEpisodeTitle || '') +
+                    '；匹配分=' +
+                    (epInfo._matchedScore || '') +
                     '；episodeId=' +
                     episodeId +
                     '；弹幕=' +
