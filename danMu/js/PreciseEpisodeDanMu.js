@@ -11,7 +11,7 @@ var danMuJS = {
         };
     },
 
-    searchDanMu: async function (searchParameters) {
+    searchDanMu: function (searchParameters) {
         try {
             var apiBases = getDanmuApiBases(searchParameters);
 
@@ -41,12 +41,19 @@ var danMuJS = {
             }
 
             var platform = detectPlatform(searchParameters);
-            var keywords = buildKeywordList(resolved.title, resolved.season, resolved.episode, platform);
+            var keywords = buildKeywordList(
+                resolved.title,
+                resolved.season,
+                resolved.episode,
+                platform
+            );
+
             var i;
             var danmu;
 
             for (i = 0; i < keywords.length; i++) {
-                danmu = await searchByMultiDanmuApi(apiBases, keywords[i]);
+                danmu = searchByMultiDanmuApi(apiBases, keywords[i]);
+
                 if (danmu && danmu.length > 0) {
                     return {
                         error: '',
@@ -55,7 +62,11 @@ var danMuJS = {
                 }
             }
 
-            danmu = await callMultiFongmiFallback(apiBases, resolved.title, resolved.episode);
+            danmu = callMultiFongmiFallback(
+                apiBases,
+                resolved.title,
+                resolved.episode
+            );
 
             if (danmu && danmu.length > 0) {
                 return {
@@ -129,6 +140,7 @@ function getDanmuApiBases(searchParameters) {
             try {
                 if (typeof getEnv === 'function') {
                     value = getEnv(tags[j], keys[i]);
+
                     if (value) {
                         return parseApiBases(value);
                     }
@@ -155,6 +167,7 @@ function parseApiBases(value) {
 
     for (i = 0; i < arr.length; i++) {
         item = normalizeApiBase(arr[i]);
+
         if (item) {
             result.push(item);
         }
@@ -283,14 +296,13 @@ function resolveCurrentEpisode(sp) {
     var inferred;
 
     if (sp) {
-        if (sp.episode) {
-            ep = toPositiveInt(sp.episode);
-            if (ep) {
-                return {
-                    episode: ep,
-                    source: 'episode'
-                };
-            }
+        ep = toPositiveInt(sp.episode);
+
+        if (ep) {
+            return {
+                episode: ep,
+                source: 'episode'
+            };
         }
 
         if (sp.danEpisode) {
@@ -309,6 +321,7 @@ function resolveCurrentEpisode(sp) {
 
     for (i = 0; i < candidates.length; i++) {
         ep = extractEpisode(candidates[i]);
+
         if (ep) {
             return {
                 episode: ep,
@@ -359,6 +372,7 @@ function resolveCurrentEpisode(sp) {
 function analyzeEpisodeList(episodes) {
     var parsed = [];
     var valid = [];
+    var nums = [];
     var i;
     var ep;
     var title;
@@ -368,7 +382,6 @@ function analyzeEpisodeList(episodes) {
     var inc = 0;
     var dec = 0;
     var order = 'unknown';
-    var nums = [];
     var hasMissing = false;
 
     for (i = 0; i < episodes.length; i++) {
@@ -404,6 +417,7 @@ function analyzeEpisodeList(episodes) {
             if (valid[i].episode > valid[i - 1].episode) {
                 inc++;
             }
+
             if (valid[i].episode < valid[i - 1].episode) {
                 dec++;
             }
@@ -481,13 +495,14 @@ function buildKeywordList(title, season, episode, platform) {
     return uniqueArray(list);
 }
 
-async function searchByMultiDanmuApi(apiBases, keyword) {
+function searchByMultiDanmuApi(apiBases, keyword) {
     var i;
     var danmu;
 
     for (i = 0; i < apiBases.length; i++) {
         try {
-            danmu = await searchByDanmuApi(apiBases[i], keyword);
+            danmu = searchByDanmuApi(apiBases[i], keyword);
+
             if (danmu && danmu.length > 0) {
                 return danmu;
             }
@@ -497,17 +512,17 @@ async function searchByMultiDanmuApi(apiBases, keyword) {
     return [];
 }
 
-async function searchByDanmuApi(apiBase, keyword) {
+function searchByDanmuApi(apiBase, keyword) {
     var matched;
     var danmu;
 
-    matched = await callDanmuApiMatch(apiBase, keyword);
+    matched = callDanmuApiMatch(apiBase, keyword);
 
     if (!matched || !matched.ok || !matched.commentId) {
         return [];
     }
 
-    danmu = await callDanmuApiComment(apiBase, matched.commentId);
+    danmu = callDanmuApiComment(apiBase, matched.commentId);
 
     if (danmu && danmu.length > 0) {
         return danmu;
@@ -516,7 +531,7 @@ async function searchByDanmuApi(apiBase, keyword) {
     return [];
 }
 
-async function callDanmuApiMatch(apiBase, keyword) {
+function callDanmuApiMatch(apiBase, keyword) {
     var url = apiBase + '/api/v2/match';
     var bodies = [];
     var i;
@@ -542,7 +557,7 @@ async function callDanmuApiMatch(apiBase, keyword) {
 
     for (i = 0; i < bodies.length; i++) {
         try {
-            res = await req(url, {
+            res = req(url, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -571,12 +586,12 @@ async function callDanmuApiMatch(apiBase, keyword) {
     };
 }
 
-async function callDanmuApiComment(apiBase, commentId) {
+function callDanmuApiComment(apiBase, commentId) {
     var url = apiBase + '/api/v2/comment/' + encodeURIComponent(commentId) + '?format=json&duration=true';
     var res;
     var json;
 
-    res = await req(url, {
+    res = req(url, {
         method: 'GET',
         headers: {
             'User-Agent': 'Mozilla/5.0'
@@ -588,13 +603,14 @@ async function callDanmuApiComment(apiBase, commentId) {
     return convertDanmuApiJsonToUz(json);
 }
 
-async function callMultiFongmiFallback(apiBases, title, episode) {
+function callMultiFongmiFallback(apiBases, title, episode) {
     var i;
     var list;
 
     for (i = 0; i < apiBases.length; i++) {
         try {
-            list = await callFongmiFallback(apiBases[i], title, episode);
+            list = callFongmiFallback(apiBases[i], title, episode);
+
             if (list && list.length > 0) {
                 return list;
             }
@@ -604,7 +620,7 @@ async function callMultiFongmiFallback(apiBases, title, episode) {
     return [];
 }
 
-async function callFongmiFallback(apiBase, title, episode) {
+function callFongmiFallback(apiBase, title, episode) {
     var urls = [];
     var i;
     var res;
@@ -616,7 +632,7 @@ async function callFongmiFallback(apiBase, title, episode) {
 
     for (i = 0; i < urls.length; i++) {
         try {
-            res = await req(urls[i], {
+            res = req(urls[i], {
                 method: 'GET',
                 headers: {
                     'User-Agent': 'Mozilla/5.0'
@@ -706,7 +722,6 @@ function convertDanmuApiJsonToUz(json) {
 
     for (i = 0; i < list.length; i++) {
         item = list[i] || {};
-
         pInfo = parsePField(item.p);
 
         text = item.text || item.m || item.message || item.content || item.msg || '';
@@ -849,7 +864,6 @@ function cleanVideoTitle(rawTitle) {
 
     title = removeQualityWords(title);
     title = removeSeasonEpisodeWords(title);
-
     title = compactSpaces(title);
 
     return title;
@@ -911,6 +925,7 @@ function removeChineseSeason(title) {
 
     while (true) {
         start = title.indexOf('第');
+
         if (start < 0) {
             break;
         }
@@ -940,6 +955,7 @@ function removeChineseEpisode(title) {
 
     while (true) {
         start = title.indexOf('第');
+
         if (start < 0) {
             break;
         }
@@ -948,6 +964,7 @@ function removeChineseEpisode(title) {
 
         for (i = 0; i < chars.length; i++) {
             end = title.indexOf(chars[i], start + 1);
+
             if (end >= 0 && (foundEnd < 0 || end < foundEnd)) {
                 foundEnd = end;
             }
@@ -966,7 +983,7 @@ function removeChineseEpisode(title) {
 }
 
 function removeSEPatternText(title) {
-    var lower = title.toLowerCase();
+    var lower;
     var sIndex;
     var eIndex;
     var endIndex;
@@ -978,10 +995,6 @@ function removeSEPatternText(title) {
         sIndex = lower.indexOf('s');
 
         if (sIndex < 0) {
-            break;
-        }
-
-        if (!isDigit(charAtSafe(lower, sIndex + 1)) && charAtSafe(lower, sIndex + 1) !== ' ') {
             break;
         }
 
@@ -1010,16 +1023,19 @@ function extractSeason(text) {
     var n;
 
     n = extractSeasonByS(t);
+
     if (n) {
         return n;
     }
 
     n = extractChineseNumberBetween(t, '第', '季');
+
     if (n) {
         return n;
     }
 
     n = extractNumberAfterWordIgnoreCase(t, 'season');
+
     if (n) {
         return n;
     }
@@ -1032,26 +1048,31 @@ function extractEpisode(text) {
     var n;
 
     n = extractEpisodeBySE(t);
+
     if (n) {
         return n;
     }
 
     n = extractNumberAfterWordIgnoreCase(t, 'ep');
+
     if (n) {
         return n;
     }
 
     n = extractNumberAfterWordIgnoreCase(t, 'e');
+
     if (n) {
         return n;
     }
 
     n = extractChineseEpisodeNumber(t);
+
     if (n) {
         return n;
     }
 
     n = extractLastSmallNumber(t);
+
     if (n) {
         return n;
     }
@@ -1070,6 +1091,7 @@ function extractSeasonByS(text) {
 
         if (ch === 's') {
             num = readNumberForward(lower, i + 1);
+
             if (num && num.value > 0 && num.value < 100) {
                 return num.value;
             }
@@ -1091,6 +1113,7 @@ function extractEpisodeBySE(text) {
 
         if (ch === 's') {
             num = readNumberForward(lower, i + 1);
+
             if (num) {
                 sFound = true;
                 i = num.end;
@@ -1099,6 +1122,7 @@ function extractEpisodeBySE(text) {
 
         if (sFound && lower.charAt(i) === 'e') {
             num = readNumberForward(lower, i + 1);
+
             if (num && num.value > 0 && num.value < 1000) {
                 return num.value;
             }
@@ -1128,6 +1152,7 @@ function extractChineseEpisodeNumber(text) {
 
     for (i = 0; i < chars.length; i++) {
         end = t.indexOf(chars[i], start + 1);
+
         if (end >= 0 && (foundEnd < 0 || end < foundEnd)) {
             foundEnd = end;
         }
@@ -1514,11 +1539,13 @@ function removeBracketContent(text, left, right) {
 
     while (true) {
         start = s.indexOf(left);
+
         if (start < 0) {
             break;
         }
 
         end = s.indexOf(right, start + 1);
+
         if (end < 0) {
             break;
         }
