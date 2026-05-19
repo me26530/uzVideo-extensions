@@ -4,6 +4,6 @@
   "url": "https://raw.githubusercontent.com/你的用户名/uzVideo-extensions/main/danMu/js/PreciseEpisodeDanMu.js",
   "env": "DANMU_API_BASES##弹幕API地址，多个用 || 分隔，如 https://api1/87654321||https://api2/87654321",
   "remark": "兼容 danmu_api，自动识别季集、缺集、倒序，支持多API",
-  "version": 4,
+  "version": 5,
   "type": 400
 }
