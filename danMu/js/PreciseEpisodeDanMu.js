@@ -1,15 +1,5 @@
-// ignore
-//@name:精准集数弹幕
-//@version:3
-//@remark:测试环境变量读取
-//@codeID:
-//@env:DANMU_API_BASES##弹幕API地址，多个用 || 分隔
-//@isAV:0
-//@deprecated:0
-// ignore
-
-class PreciseEpisodeDanMu {
-    async getLines() {
+var danMuJS = {
+    getLines: function () {
         return {
             error: '',
             data: [
@@ -19,71 +9,80 @@ class PreciseEpisodeDanMu {
                 }
             ]
         }
-    }
+    },
 
-    async searchDanMu(searchParameters) {
-        const apiBases = this.getDanmuApiBases(searchParameters)
+    searchDanMu: function (searchParameters) {
+        var apiBases = getDanmuApiBases(searchParameters)
 
         return {
             error: '测试：读取到 API 数量 = ' + apiBases.length + '；API = ' + apiBases.join(' , '),
             data: []
         }
     }
-
-    getDanmuApiBases(searchParameters) {
-        const keys = ['DANMU_API_BASES', 'DANMU_API_BASE']
-        const tagCandidates = []
-
-        try {
-            if (this.uzTag) tagCandidates.push(this.uzTag)
-        } catch (e) {}
-
-        try {
-            if (searchParameters && searchParameters.uzTag) {
-                tagCandidates.push(searchParameters.uzTag)
-            }
-        } catch (e) {}
-
-        try {
-            if (typeof uzTag !== 'undefined' && uzTag) {
-                tagCandidates.push(uzTag)
-            }
-        } catch (e) {}
-
-        tagCandidates.push('')
-
-        for (const key of keys) {
-            for (const tag of tagCandidates) {
-                try {
-                    if (typeof getEnv === 'function') {
-                        const value = getEnv(tag, key)
-                        if (value) {
-                            return this.parseApiBases(value)
-                        }
-                    }
-                } catch (e) {}
-            }
-        }
-
-        return []
-    }
-
-    parseApiBases(value) {
-        return String(value || '')
-            .split(/\|\||\n|,/)
-            .map(x => this.normalizeApiBase(x))
-            .filter(Boolean)
-    }
-
-    normalizeApiBase(base) {
-        base = String(base || '').trim()
-        if (!base) return ''
-
-        base = base.replace(/\/api\/v2\/?$/i, '')
-        base = base.replace(/\/+$/, '')
-
-        return base
-    }
 }
 
-var danMuJS = new PreciseEpisodeDanMu()
+function getDanmuApiBases(searchParameters) {
+    var value = ''
+    var tags = []
+    var keys = ['DANMU_API_BASES', 'DANMU_API_BASE']
+    var i
+    var j
+
+    try {
+        if (typeof uzTag !== 'undefined' && uzTag) {
+            tags.push(uzTag)
+        }
+    } catch (e) {}
+
+    try {
+        if (searchParameters && searchParameters.uzTag) {
+            tags.push(searchParameters.uzTag)
+        }
+    } catch (e) {}
+
+    tags.push('')
+
+    for (i = 0; i < keys.length; i++) {
+        for (j = 0; j < tags.length; j++) {
+            try {
+                if (typeof getEnv === 'function') {
+                    value = getEnv(tags[j], keys[i])
+                    if (value) {
+                        return parseApiBases(value)
+                    }
+                }
+            } catch (e) {}
+        }
+    }
+
+    return []
+}
+
+function parseApiBases(value) {
+    var arr = String(value || '').split(/\|\||\n|,/)
+    var result = []
+    var i
+    var item
+
+    for (i = 0; i < arr.length; i++) {
+        item = normalizeApiBase(arr[i])
+        if (item) {
+            result.push(item)
+        }
+    }
+
+    return result
+}
+
+function normalizeApiBase(base) {
+    base = String(base || '').trim()
+
+    if (!base) {
+        return ''
+    }
+
+    base = base.replace(/\/api\/v2\/?$/i, '')
+    base = base.replace(/\/+$/, '')
+
+    return base
+}
