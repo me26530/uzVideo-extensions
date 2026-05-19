@@ -233,7 +233,7 @@ function parseEpisodeFromUrl(url) {
     if (!url) return null
 
     const patterns = [
-        /?:episode|ep|e|index|nid|vidIndex|play|page=(\d{1,4})(?:\D|$)/i,
+        /[?&#](?:episode|ep|e|index|nid|vidIndex|play|page=)(\d{1,4})(?:\D|$)/i,
         /\/(?:episode|episodes|ep|e)\/(\d{1,4})(?:[/?#]|$)/i,
         /(?:episode|episodes|ep|e)[-_]?(\d{1,4})(?:\D|$)/i,
         /\/(\d{1,4})\.html(?:[?#].*)?$/i,
