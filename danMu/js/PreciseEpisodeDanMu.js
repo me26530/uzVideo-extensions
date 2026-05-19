@@ -1,895 +1,1622 @@
-// ignore
-//@name:精准集数弹幕
-//@version:4
-//@type:400
-//@remark:严格符合 danMu type:400；修复初始化语法错误；精准识别播放集数；API失败跳过
-//@env:精准弹幕API##可选，兼容 dandanPlay API。格式：线路名@https://api.example.com|线路2@https://api2.example.com&&最小弹幕数量##可选，默认 1&&显示匹配提示##调试用，1显示，0不显示，默认0
-//@order:A00
-//@isAV:0
-//@deprecated:0
-// ignore
-
-const appConfig = {
-    _uzTag: '',
-    get uzTag() {
-        return this._uzTag
+var danMuJS = {
+    getLines: function () {
+        return {
+            error: '',
+            data: [
+                {
+                    name: '精准匹配',
+                    value: 'precise'
+                }
+            ]
+        };
     },
-    set uzTag(value) {
-        this._uzTag = value
-    },
-}
 
-class DanMu {
-    constructor() {
-        this.content = ''
-        this.time = 0
-        this.color = ''
-    }
-}
-
-class BackData {
-    constructor() {
-        this.data = []
-        this.error = ''
-    }
-}
-
-class DanVideoPlatform {
-    constructor() {
-        this.name = ''
-        this.isLineSwitchSupported = false
-    }
-}
-
-class DanEpisode {
-    constructor() {
-        this.vod_name = ''
-        this.vod_remarks = ''
-        this.extData = {}
-    }
-}
-
-class DanVideo extends DanEpisode {
-    constructor() {
-        super()
-        this.vod_pic = ''
-    }
-}
-
-function normalizeText(value) {
-    if (value === undefined || value === null) return ''
-    return String(value).trim()
-}
-
-function safeDecodeURIComponent(value) {
-    try {
-        return decodeURIComponent(value)
-    } catch (e) {
-        return value
-    }
-}
-
-function toNumberSafe(value) {
-    if (value === undefined || value === null || value === '') return null
-    var n = Number(value)
-    if (!Number.isFinite(n)) return null
-    if (n <= 0 || n > 3000) return null
-    return Math.floor(n)
-}
-
-function getField(obj, keys) {
-    if (!obj) return ''
-    for (var i = 0; i < keys.length; i++) {
-        var value = obj[keys[i]]
-        if (value !== undefined && value !== null && value !== '') {
-            return value
-        }
-    }
-    return ''
-}
-
-function safeGetEnv(key) {
-    try {
-        if (typeof getEnv === 'function') {
-            return normalizeText(getEnv(appConfig.uzTag, key))
-        }
-    } catch (e) {}
-    return ''
-}
-
-function getMinDanmuCount() {
-    var n = toNumberSafe(safeGetEnv('最小弹幕数量'))
-    return n || 1
-}
-
-function shouldShowMatchTip() {
-    var v = safeGetEnv('显示匹配提示')
-    return v === '1' || v === 'true' || v === '是'
-}
-
-function makeSafeMatchTip(info) {
-    info = normalizeText(info)
-        .replace(/\s+/g, ' ')
-        .replace(/[<>]/g, '')
-        .trim()
-
-    if (info.length > 60) {
-        info = info.substring(0, 60) + '...'
-    }
-
-    return info
-}
-
-function chineseNumberToInt(str) {
-    str = normalizeText(str)
-    if (!str) return null
-    if (/^\d+$/.test(str)) return Number(str)
-
-    var map = {
-        零: 0,
-        〇: 0,
-        一: 1,
-        二: 2,
-        两: 2,
-        三: 3,
-        四: 4,
-        五: 5,
-        六: 6,
-        七: 7,
-        八: 8,
-        九: 9,
-    }
-
-    if (str === '十') return 10
-
-    if (str.indexOf('百') >= 0) {
-        var arr100 = str.split('百')
-        var hundreds = arr100[0] ? map[arr100[0]] || Number(arr100[0]) || 1 : 1
-        var rest = arr100[1] ? chineseNumberToInt(arr100[1]) : 0
-        return hundreds * 100 + rest
-    }
-
-    if (str.indexOf('十') >= 0) {
-        var arr10 = str.split('十')
-        var tens = arr10[0] ? map[arr10[0]] || Number(arr10[0]) || 1 : 1
-        var ones = arr10[1] ? map[arr10[1]] || Number(arr10[1]) || 0 : 0
-        return tens * 10 + ones
-    }
-
-    return map[str] || null
-}
-
-function parseEpisodeNumber(text) {
-    text = normalizeText(text)
-    if (!text) return null
-
-    var patterns = [
-        /第\s*(\d{1,4})\s*[集话話回]/,
-        /第\s*([零〇一二两三四五六七八九十百]+)\s*[集话話回]/,
-        /(?:EP|Ep|ep|Episode|episode)\s*\.?\s*(\d{1,4})/,
-        /(?:^|[^A-Za-z])E\s*(\d{1,4})(?:\D|$)/i,
-        /(?:^|[^\d])(\d{1,4})\s*[集话話回]/,
-        /(?:^|\s)(\d{1,4})(?:\s|$)/,
-    ]
-
-    for (var i = 0; i < patterns.length; i++) {
-        var m = text.match(patterns[i])
-        if (!m) continue
-
-        var n = /^\d+$/.test(m[1]) ? Number(m[1]) : chineseNumberToInt(m[1])
-        if (n && n > 0 && n < 3000) return n
-    }
-
-    return null
-}
-
-function parseSeasonEpisode(text) {
-    text = normalizeText(text)
-
-    var result = {
-        season: null,
-        episode: null,
-        episodeTitle: '',
-        source: '',
-        confidence: 0,
-    }
-
-    if (!text) return result
-
-    var m = text.match(/S\s*(\d{1,2})\s*E\s*(\d{1,4})/i)
-    if (m) {
-        result.season = toNumberSafe(m[1])
-        result.episode = toNumberSafe(m[2])
-        result.episodeTitle = '第' + result.episode + '集'
-        result.source = 'SxxExx'
-        result.confidence = 95
-        return result
-    }
-
-    m = text.match(/第\s*(\d{1,2})\s*[季部].*?第\s*(\d{1,4})\s*[集话話回]/)
-    if (m) {
-        result.season = toNumberSafe(m[1])
-        result.episode = toNumberSafe(m[2])
-        result.episodeTitle = '第' + result.episode + '集'
-        result.source = 'season_episode_number'
-        result.confidence = 95
-        return result
-    }
-
-    m = text.match(/第\s*([零〇一二两三四五六七八九十百]+)\s*[季部].*?第\s*([零〇一二两三四五六七八九十百]+)\s*[集话話回]/)
-    if (m) {
-        result.season = chineseNumberToInt(m[1])
-        result.episode = chineseNumberToInt(m[2])
-        result.episodeTitle = '第' + result.episode + '集'
-        result.source = 'season_episode_cn'
-        result.confidence = 95
-        return result
-    }
-
-    var ep = parseEpisodeNumber(text)
-    if (ep) {
-        result.episode = ep
-        result.episodeTitle = '第' + ep + '集'
-        result.source = 'episode_only'
-        result.confidence = 70
-    }
-
-    return result
-}
-
-function parseEpisodeFromUrl(url) {
-    url = safeDecodeURIComponent(normalizeText(url))
-    if (!url) return null
-
-    var patterns = [
-        /?:episode|ep|e|index|nid|vidIndex|play|page=(\d{1,4})(?:\D|$)/i,
-        /\/(?:episode|episodes|ep|e)\/(\d{1,4})(?:[/?#]|$)/i,
-        /(?:episode|episodes|ep|e)[-_]?(\d{1,4})(?:\D|$)/i,
-        /\/(\d{1,4})\.html(?:[?#].*)?$/i,
-        /第\s*(\d{1,4})\s*[集话話回]/,
-    ]
-
-    for (var i = 0; i < patterns.length; i++) {
-        var m = url.match(patterns[i])
-        if (!m) continue
-
-        var n = toNumberSafe(m[1])
-        if (n) return n
-    }
-
-    return null
-}
-
-function cleanEnglishRomanTitle(title) {
-    title = normalizeText(title)
-    if (!title) return ''
-
-    return title
-        .replace(/\bS\s*\d{1,2}\s*E\s*\d{1,4}\b/gi, '')
-        .replace(/\bSeason\s*\d{1,2}\b/gi, '')
-        .replace(/\b(?:EP|Ep|Episode)\s*\.?\s*\d{1,4}\b/gi, '')
-        .replace(/\b(?:OVA|OAD|SP|Special|Trailer|Preview|PV)\s*\d*\b/gi, '')
-        .replace(/\b(?:1080p|720p|2160p|4K|HEVC|H265|H264|x264|x265|WEB[- ]?DL|WEBRip|BDRip|BluRay|Baha|CR|AMZN|NF)\b/gi, '')
-        .replace(/$$[^$$]*\]/g, '')
-        .replace(/【[^】]*】/g, '')
-        .replace(/$$[^)]*$$/g, '')
-        .replace(/[._-]+/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim()
-}
-
-function cleanClickedTitle(title) {
-    title = normalizeText(title)
-
-    var cnClean = title
-        .replace(/S\s*\d{1,2}\s*E\s*\d{1,4}/gi, '')
-        .replace(/第\s*[零〇一二两三四五六七八九十百\d]+\s*[季部]/g, '')
-        .replace(/第\s*[零〇一二两三四五六七八九十百\d]+\s*[集话話回]/g, '')
-        .replace(/(?:EP|Episode)\s*\.?\s*\d{1,4}/gi, '')
-        .replace(/更新至\s*\d{1,4}\s*[集话話回]/g, '')
-        .replace(/[$$【(（].*?[$$】)）]/g, '')
-        .replace(/\s+/g, ' ')
-        .trim()
-
-    return cleanEnglishRomanTitle(cnClean)
-}
-
-function buildTitleCandidates(epInfo) {
-    var list = []
-
-    function push(v) {
-        v = normalizeText(v)
-        if (v && list.indexOf(v) < 0) list.push(v)
-    }
-
-    push(epInfo.clickedTitle)
-    push(epInfo.cleanTitle)
-    push(cleanEnglishRomanTitle(epInfo.clickedTitle))
-    push(cleanClickedTitle(epInfo.clickedTitle))
-
-    return list
-}
-
-function pickEpisodeInfo(item) {
-    var p = item || {}
-
-    var clickedTitle = normalizeText(getField(p, ['name', 'title', 'videoName', 'vodName']))
-
-    var titleText = [
-        p.name,
-        p.title,
-        p.videoName,
-        p.vodName,
-        p.originalTitle,
-        p.subTitle,
-        p.remark,
-    ]
-        .filter(Boolean)
-        .join(' ')
-
-    var info = {
-        clickedTitle: clickedTitle,
-        cleanTitle: cleanClickedTitle(clickedTitle),
-        season: null,
-        episode: null,
-        episodeTitle: '',
-        videoUrl: normalizeText(p.videoUrl || p.playUrl || p.url || ''),
-        episodeId: '',
-        source: '',
-        confidence: 0,
-    }
-
-    if (p.danEpisode) {
-        var epObj = p.danEpisode
-
-        if (typeof epObj === 'string') {
-            var parsedEp = parseSeasonEpisode(epObj)
-            info.episode = parsedEp.episode
-            info.season = parsedEp.season
-            info.episodeTitle = epObj
-            info.source = 'danEpisode_string'
-            info.confidence = parsedEp.episode ? 100 : 0
-            return info
-        }
-
-        var ext = epObj.extData || epObj.raw || {}
-
-        info.episodeId = normalizeText(ext.episodeId || epObj.episodeId || epObj.id || '')
-
-        var epTitle = normalizeText(
-            getField(epObj, ['vod_name', 'name', 'title', 'episodeName', 'label']) ||
-                getField(ext, ['episodeTitle', 'title', 'name'])
-        )
-
-        var epNum =
-            toNumberSafe(ext.episode) ||
-            toNumberSafe(ext.episodeNumber) ||
-            toNumberSafe(epObj.episode) ||
-            toNumberSafe(epObj.ep) ||
-            toNumberSafe(epObj.number) ||
-            parseEpisodeNumber(epTitle)
-
-        info.episode = epNum
-        info.season = toNumberSafe(ext.season) || toNumberSafe(epObj.season) || null
-        info.episodeTitle = epTitle || (epNum ? '第' + epNum + '集' : '')
-        info.videoUrl = normalizeText(epObj.url || epObj.videoUrl || ext.url || info.videoUrl)
-        info.source = 'danEpisode_object'
-        info.confidence = epNum || info.episodeId ? 100 : 0
-
-        return info
-    }
-
-    if (p.episode !== undefined && p.episode !== null && p.episode !== '') {
-        var epNum2 = toNumberSafe(p.episode) || parseEpisodeNumber(p.episode)
-
-        if (epNum2) {
-            info.episode = epNum2
-            info.episodeTitle = '第' + epNum2 + '集'
-            info.source = 'searchParameters.episode'
-            info.confidence = 95
-            return info
-        }
-    }
-
-    var epFromUrl = parseEpisodeFromUrl(info.videoUrl)
-    if (epFromUrl) {
-        info.episode = epFromUrl
-        info.episodeTitle = '第' + epFromUrl + '集'
-        info.source = 'videoUrl'
-        info.confidence = 80
-        return info
-    }
-
-    var parsed = parseSeasonEpisode(titleText)
-    if (parsed.episode) {
-        info.season = parsed.season
-        info.episode = parsed.episode
-        info.episodeTitle = parsed.episodeTitle
-        info.source = 'title:' + parsed.source
-        info.confidence = parsed.confidence
-        return info
-    }
-
-    return info
-}
-
-function normalizeApiBase(base) {
-    return normalizeText(base).replace(/\/+$/, '')
-}
-
-function buildApiUrl(api, path) {
-    var base = normalizeApiBase(api.base)
-    if (!base) return ''
-
-    if (base.endsWith('/api/v2')) {
-        return base + path.replace(/^\/api\/v2/, '')
-    }
-
-    return base + path
-}
-
-function parseCustomApis() {
-    var result = []
-    var env = safeGetEnv('精准弹幕API')
-
-    if (!env) return result
-
-    var parts = env
-        .split(/[|;]/)
-        .map(function (x) {
-            return x.trim()
-        })
-        .filter(Boolean)
-
-    for (var i = 0; i < parts.length; i++) {
-        var arr = parts[i].split('@')
-
-        if (arr.length >= 2) {
-            var name = normalizeText(arr.shift())
-            var base = normalizeApiBase(arr.join('@'))
-
-            if (name && base) {
-                result.push({
-                    name: name,
-                    base: base,
-                    builtin: false,
-                })
-            }
-        }
-    }
-
-    return result
-}
-
-function getApiConfigs(preferredName) {
-    var apis = [
-        {
-            name: 'dandanPlay',
-            base: 'https://api.dandanplay.net',
-            builtin: true,
-        },
-    ].concat(parseCustomApis())
-
-    preferredName = normalizeText(preferredName)
-
-    if (!preferredName || preferredName === '平台优先') {
-        return apis
-    }
-
-    var selected = []
-    var others = []
-
-    for (var i = 0; i < apis.length; i++) {
-        if (apis[i].name === preferredName) {
-            selected.push(apis[i])
-        } else {
-            others.push(apis[i])
-        }
-    }
-
-    return selected.concat(others)
-}
-
-function parseDandanPlayComments(comments) {
-    var list = []
-
-    if (!comments || comments.length === 0) return list
-
-    for (var i = 0; i < comments.length; i++) {
-        var element = comments[i]
-        var params = normalizeText(element.p).split(',')
-
-        var danMu = new DanMu()
-        danMu.content = element.m || element.text || element.content || ''
-        danMu.time = Number(params[0] || element.time || 0)
-        danMu.color = params[2] || element.color || ''
-
-        if (danMu.content) {
-            list.push(danMu)
-        }
-    }
-
-    return list
-}
-
-function createMatchInfoDanMu(info) {
-    var danMu = new DanMu()
-    danMu.time = 0.1
-    danMu.color = '16776960'
-    danMu.content = '匹配：' + makeSafeMatchTip(info)
-    return danMu
-}
-
-function formatEpisodeTitle(item, index) {
-    var rawTitle = normalizeText(item.episodeTitle || item.title || item.name)
-
-    var epNum =
-        toNumberSafe(item.episode) ||
-        toNumberSafe(item.episodeNumber) ||
-        parseEpisodeNumber(rawTitle)
-
-    var epPrefix = epNum ? '第' + epNum + '集' : '剧集' + (index + 1)
-
-    var cleanTitle = rawTitle
-        .replace(/^第\s*[零〇一二两三四五六七八九十百\d]+\s*[集话話回]\s*[-:：]?\s*/g, '')
-        .trim()
-
-    var airDate = normalizeText(item.airDate || item.airdate || item.date)
-
-    var title = cleanTitle && cleanTitle !== epPrefix ? epPrefix + ' - ' + cleanTitle : epPrefix
-
-    if (airDate) {
-        title += ' (' + airDate + ')'
-    }
-
-    return title
-}
-
-async function searchEpisodesByApi(api, animeName, episode) {
-    var url = buildApiUrl(api, '/api/v2/search/episodes')
-    if (!url) return null
-
-    return await req(url, {
-        queryParameters: {
-            anime: animeName,
-            episode: episode ? String(episode) : '',
-        },
-    })
-}
-
-async function getCommentsByApi(api, episodeId) {
-    var locale = typeof kLocale !== 'undefined' ? normalizeText(kLocale) : ''
-    var isSimplified = locale.indexOf('CN') !== -1
-
-    var url = buildApiUrl(
-        api,
-        '/api/v2/comment/' +
-            episodeId +
-            '?withRelated=true&chConvert=' +
-            (isSimplified ? '1' : '2')
-    )
-
-    if (!url) return null
-
-    return await req(url)
-}
-
-async function getLines() {
-    var apiNames = getApiConfigs('').map(function (x) {
-        return x.name
-    })
-
-    return formatBackData({
-        lines: apiNames,
-        error: '',
-    })
-}
-
-async function getVideoPlatformList() {
-    var data = []
-
-    var first = new DanVideoPlatform()
-    first.name = '平台优先'
-    first.isLineSwitchSupported = true
-    data.push(first)
-
-    var apis = getApiConfigs('')
-
-    for (var i = 0; i < apis.length; i++) {
-        var platform = new DanVideoPlatform()
-        platform.name = apis[i].name
-        platform.isLineSwitchSupported = false
-        data.push(platform)
-    }
-
-    return formatBackData({
-        data: data,
-        error: '',
-    })
-}
-
-async function getVideoList(args) {
-    var backData = {
-        data: [],
-        error: '',
-    }
-
-    var errors = []
-
-    try {
-        args = args || {}
-
-        var keyword = normalizeText(args.name || args.title || args.keyword || '')
-
-        if (!keyword) {
-            backData.error = '缺少搜索标题'
-            return formatBackData(backData)
-        }
-
-        var apis = getApiConfigs(args.videoPlatformName)
-
-        var titleCandidates = [keyword, cleanClickedTitle(keyword), cleanEnglishRomanTitle(keyword)]
-            .filter(Boolean)
-            .filter(function (v, i, a) {
-                return a.indexOf(v) === i
-            })
-
-        for (var i = 0; i < apis.length; i++) {
-            var api = apis[i]
-
-            try {
-                var found = []
-
-                for (var t = 0; t < titleCandidates.length && found.length === 0; t++) {
-                    var searchResult = await searchEpisodesByApi(api, titleCandidates[t], '')
-                    found = searchResult && searchResult.data && searchResult.data.animes
-                        ? searchResult.data.animes
-                        : []
-                }
-
-                if (found.length === 0) continue
-
-                for (var j = 0; j < found.length; j++) {
-                    var anime = found[j]
-
-                    var video = new DanVideo()
-                    video.vod_name = anime.animeTitle || anime.title || anime.name || keyword
-                    video.vod_remarks = api.name + (anime.type ? ' · ' + anime.type : '')
-                    video.extData = anime
-                    video.extData.apiName = api.name
-                    video.extData.apiBase = api.base
-
-                    backData.data.push(video)
-                }
-
-                if (normalizeText(args.videoPlatformName) === '平台优先' || !normalizeText(args.videoPlatformName)) {
-                    break
-                }
-            } catch (error) {
-                errors.push(api.name + ': ' + error.toString())
-                continue
-            }
-        }
-    } catch (error2) {
-        backData.error = error2.toString()
-    }
-
-    if (backData.data.length === 0 && errors.length > 0) {
-        backData.error = 'API均不可用或无结果：' + errors.join('；')
-    }
-
-    return formatBackData(backData)
-}
-
-async function getVideoEpisodes(args) {
-    var backData = {
-        data: [],
-        error: '',
-    }
-
-    try {
-        args = args || {}
-
-        var danVideo = args.danVideo || {}
-        var ext = danVideo.extData || danVideo.raw || danVideo
-        var episodes = ext.episodes || []
-
-        for (var i = 0; i < episodes.length; i++) {
-            var item = episodes[i]
-
-            var episode = new DanEpisode()
-            var friendlyTitle = formatEpisodeTitle(item, i)
-
-            var epNum =
-                toNumberSafe(item.episode) ||
-                toNumberSafe(item.episodeNumber) ||
-                parseEpisodeNumber(friendlyTitle)
-
-            episode.vod_name = friendlyTitle
-
-            var remarks = []
-            if (ext.apiName) remarks.push(ext.apiName)
-            if (item.type) remarks.push(item.type)
-            if (item.duration) remarks.push(String(item.duration))
-
-            episode.vod_remarks = remarks.join(' · ')
-
-            episode.extData = item
-            episode.extData.apiName = ext.apiName || ''
-            episode.extData.apiBase = ext.apiBase || ''
-            episode.extData.episode = epNum
-            episode.extData.episodeId = item.episodeId || item.id || ''
-            episode.extData.episodeTitle = friendlyTitle
-
-            backData.data.push(episode)
-        }
-    } catch (error) {
-        backData.error = error.toString()
-    }
-
-    return formatBackData(backData)
-}
-
-async function searchDanMu(item) {
-    var backData = new BackData()
-    var lastInfo = ''
-
-    try {
-        item = item || {}
-
-        var epInfo = pickEpisodeInfo(item)
-        var titleCandidates = buildTitleCandidates(epInfo)
-
-        if (titleCandidates.length === 0) {
-            backData.error = '缺少标题，无法搜索弹幕'
-            return formatBackData(backData)
-        }
-
-        if (!epInfo.episode && !epInfo.episodeId) {
-            backData.error = '未识别到播放集数，请手动选择剧集'
-
-            if (shouldShowMatchTip()) {
-                backData.data.push(createMatchInfoDanMu('未识别集数：' + (epInfo.clickedTitle || '')))
-            }
-
-            return formatBackData(backData)
-        }
-
-        var result = await searchByApis(titleCandidates, epInfo, item)
-        backData.data = result.list
-        lastInfo = result.info
-    } catch (error) {
-        backData.error = error.toString()
-    }
-
-    if (lastInfo && shouldShowMatchTip()) {
-        backData.data.unshift(createMatchInfoDanMu(lastInfo))
-    }
-
-    var realCount = backData.data.length
-
-    if (lastInfo && shouldShowMatchTip()) {
-        realCount = Math.max(0, backData.data.length - 1)
-    }
-
-    if (realCount === 0 && !backData.error) {
-        backData.error = '未找到弹幕'
-    }
-
-    return formatBackData(backData)
-}
-
-async function searchByApis(titleCandidates, epInfo, item) {
-    var minCount = getMinDanmuCount()
-    var apis = getApiConfigs(item.videoPlatformName || item.line)
-
-    var errors = []
-    var lastTried = ''
-
-    var manualApiName = ''
-    if (item.danEpisode && item.danEpisode.extData) {
-        manualApiName = normalizeText(item.danEpisode.extData.apiName)
-    }
-
-    if (manualApiName) {
-        apis.sort(function (a, b) {
-            if (a.name === manualApiName) return -1
-            if (b.name === manualApiName) return 1
-            return 0
-        })
-    }
-
-    for (var i = 0; i < apis.length; i++) {
-        var api = apis[i]
-
+    searchDanMu: async function (searchParameters) {
         try {
-            var episodeId = epInfo.episodeId
-            var matchedTitle = titleCandidates[0]
+            var apiBases = getDanmuApiBases(searchParameters);
 
-            if (!episodeId) {
-                var animes = []
-
-                for (var t = 0; t < titleCandidates.length && animes.length === 0; t++) {
-                    matchedTitle = titleCandidates[t]
-
-                    var searchResult = await searchEpisodesByApi(api, matchedTitle, epInfo.episode)
-
-                    animes =
-                        searchResult &&
-                        searchResult.data &&
-                        searchResult.data.animes
-                            ? searchResult.data.animes
-                            : []
-                }
-
-                if (animes.length === 0 || !animes[0].episodes || animes[0].episodes.length === 0) {
-                    lastTried = api.name + '/' + matchedTitle + '/第' + (epInfo.episode || '') + '集：无搜索结果'
-                    continue
-                }
-
-                episodeId = animes[0].episodes[0].episodeId
+            if (!apiBases || apiBases.length < 1) {
+                return {
+                    error: '请先配置 DANMU_API_BASES，多个 API 用 || 分隔',
+                    data: []
+                };
             }
 
-            if (!episodeId) {
-                lastTried = api.name + '/' + matchedTitle + '：无 episodeId'
-                continue
+            var title = getTitleFromSearchParameters(searchParameters);
+
+            if (!title) {
+                return {
+                    error: '无法从参数中获取剧名',
+                    data: []
+                };
             }
 
-            var danMuResult = await getCommentsByApi(api, episodeId)
+            var resolved = resolveTitleSeasonEpisode(searchParameters, title);
 
-            var comments =
-                danMuResult &&
-                danMuResult.data &&
-                danMuResult.data.comments
-                    ? danMuResult.data.comments
-                    : []
+            if (!resolved.ok) {
+                return {
+                    error: resolved.error,
+                    data: []
+                };
+            }
 
-            var list = parseDandanPlayComments(comments)
+            var platform = detectPlatform(searchParameters);
+            var keywords = buildKeywordList(resolved.title, resolved.season, resolved.episode, platform);
+            var i;
+            var danmu;
 
-            if (list.length < minCount) {
-                lastTried =
-                    api.name +
-                    '/' +
-                    matchedTitle +
-                    '/episodeId=' +
-                    episodeId +
-                    '：弹幕数 ' +
-                    list.length +
-                    ' 小于阈值 ' +
-                    minCount
+            for (i = 0; i < keywords.length; i++) {
+                danmu = await searchByMultiDanmuApi(apiBases, keywords[i]);
+                if (danmu && danmu.length > 0) {
+                    return {
+                        error: '',
+                        data: danmu
+                    };
+                }
+            }
 
-                continue
+            danmu = await callMultiFongmiFallback(apiBases, resolved.title, resolved.episode);
+
+            if (danmu && danmu.length > 0) {
+                return {
+                    error: '',
+                    data: danmu
+                };
             }
 
             return {
-                list: list,
-                info:
-                    '成功；平台=' +
-                    api.name +
-                    '；标题=' +
-                    matchedTitle +
-                    '；集数=' +
-                    (epInfo.episode || '') +
-                    '；来源=' +
-                    epInfo.source +
-                    '；episodeId=' +
-                    episodeId +
-                    '；弹幕=' +
-                    list.length,
-            }
-        } catch (error) {
-            errors.push(api.name + ': ' + error.toString())
-            continue
+                error: '未找到匹配弹幕：' + resolved.title + ' S' + pad2(resolved.season) + 'E' + pad2(resolved.episode),
+                data: []
+            };
+        } catch (e) {
+            return {
+                error: e && e.message ? e.message : String(e),
+                data: []
+            };
+        }
+    },
+
+    getVideoPlatformList: function () {
+        return {
+            error: '',
+            data: [
+                {
+                    name: '自动匹配',
+                    value: 'auto'
+                }
+            ]
+        };
+    },
+
+    getVideoList: function () {
+        return {
+            error: '当前扩展仅支持自动匹配',
+            data: []
+        };
+    },
+
+    getVideoEpisodes: function () {
+        return {
+            error: '当前扩展仅支持自动匹配',
+            data: []
+        };
+    }
+};
+
+function getDanmuApiBases(searchParameters) {
+    var value = '';
+    var tags = [];
+    var keys = ['DANMU_API_BASES', 'DANMU_API_BASE'];
+    var i;
+    var j;
+
+    try {
+        if (typeof uzTag !== 'undefined' && uzTag) {
+            tags.push(uzTag);
+        }
+    } catch (e1) {}
+
+    try {
+        if (searchParameters && searchParameters.uzTag) {
+            tags.push(searchParameters.uzTag);
+        }
+    } catch (e2) {}
+
+    tags.push('');
+
+    for (i = 0; i < keys.length; i++) {
+        for (j = 0; j < tags.length; j++) {
+            try {
+                if (typeof getEnv === 'function') {
+                    value = getEnv(tags[j], keys[i]);
+                    if (value) {
+                        return parseApiBases(value);
+                    }
+                }
+            } catch (e3) {}
         }
     }
 
-    var info =
-        errors.length > 0
-            ? '失败跳过；' + errors.join('；') + '；最后=' + lastTried
-            : '失败；' + lastTried
+    return [];
+}
+
+function parseApiBases(value) {
+    var text = String(value || '');
+    var result = [];
+    var arr;
+    var i;
+    var item;
+
+    text = replaceAllText(text, '\r\n', '||');
+    text = replaceAllText(text, '\n', '||');
+    text = replaceAllText(text, ',', '||');
+
+    arr = text.split('||');
+
+    for (i = 0; i < arr.length; i++) {
+        item = normalizeApiBase(arr[i]);
+        if (item) {
+            result.push(item);
+        }
+    }
+
+    return uniqueArray(result);
+}
+
+function normalizeApiBase(base) {
+    base = String(base || '').trim();
+
+    if (!base) {
+        return '';
+    }
+
+    while (base.length > 0 && base.charAt(base.length - 1) === '/') {
+        base = base.substring(0, base.length - 1);
+    }
+
+    if (endsWithIgnoreCase(base, '/api/v2')) {
+        base = base.substring(0, base.length - 7);
+    }
+
+    while (base.length > 0 && base.charAt(base.length - 1) === '/') {
+        base = base.substring(0, base.length - 1);
+    }
+
+    return base;
+}
+
+function getTitleFromSearchParameters(sp) {
+    var list = [];
+    var i;
+    var item;
+    var title;
+
+    if (!sp) {
+        return '';
+    }
+
+    list.push(sp.clickedTitle);
+    list.push(sp.videoName);
+    list.push(sp.name);
+    list.push(sp.title);
+    list.push(sp.rawTitle);
+
+    if (sp.danVideo) {
+        list.push(sp.danVideo.name);
+        list.push(sp.danVideo.title);
+    }
+
+    for (i = 0; i < list.length; i++) {
+        item = list[i];
+        title = cleanVideoTitle(item);
+
+        if (title && !isEpisodeOnly(title)) {
+            return String(item || '').trim();
+        }
+    }
+
+    return '';
+}
+
+function resolveTitleSeasonEpisode(sp, rawTitle) {
+    var allText = '';
+    var season;
+    var epResult;
+    var cleanTitle;
+
+    allText = joinText([
+        rawTitle,
+        sp ? sp.name : '',
+        sp ? sp.title : '',
+        sp ? sp.videoName : '',
+        sp ? sp.episodeName : '',
+        sp ? sp.videoUrl : '',
+        sp ? sp.url : '',
+        sp ? sp.playUrl : '',
+        sp && sp.danEpisode ? sp.danEpisode.name : '',
+        sp && sp.danEpisode ? sp.danEpisode.title : '',
+        sp && sp.danEpisode ? sp.danEpisode.url : ''
+    ]);
+
+    season = extractSeason(allText);
+    epResult = resolveCurrentEpisode(sp);
+
+    if (!epResult.episode) {
+        return {
+            ok: false,
+            error: '无法确认当前集数',
+            title: '',
+            season: season,
+            episode: 0
+        };
+    }
+
+    cleanTitle = cleanVideoTitle(rawTitle);
+
+    if (!cleanTitle) {
+        return {
+            ok: false,
+            error: '无法确认剧名',
+            title: '',
+            season: season,
+            episode: epResult.episode
+        };
+    }
 
     return {
-        list: [],
-        info: info,
+        ok: true,
+        error: '',
+        title: cleanTitle,
+        season: season,
+        episode: epResult.episode
+    };
+}
+
+function resolveCurrentEpisode(sp) {
+    var candidates = [];
+    var i;
+    var ep;
+    var list;
+    var currentIndex;
+    var analyzed;
+    var current;
+    var inferred;
+
+    if (sp) {
+        if (sp.episode) {
+            ep = toPositiveInt(sp.episode);
+            if (ep) {
+                return {
+                    episode: ep,
+                    source: 'episode'
+                };
+            }
+        }
+
+        if (sp.danEpisode) {
+            candidates.push(sp.danEpisode.name);
+            candidates.push(sp.danEpisode.title);
+            candidates.push(sp.danEpisode.url);
+        }
+
+        candidates.push(sp.episodeName);
+        candidates.push(sp.videoUrl);
+        candidates.push(sp.url);
+        candidates.push(sp.playUrl);
+        candidates.push(sp.name);
+        candidates.push(sp.title);
     }
+
+    for (i = 0; i < candidates.length; i++) {
+        ep = extractEpisode(candidates[i]);
+        if (ep) {
+            return {
+                episode: ep,
+                source: 'explicit'
+            };
+        }
+    }
+
+    list = sp && sp.episodeList ? sp.episodeList : null;
+
+    if (!list && sp && sp.episodes) {
+        list = sp.episodes;
+    }
+
+    currentIndex = -1;
+
+    if (sp && typeof sp.currentIndex === 'number') {
+        currentIndex = sp.currentIndex;
+    }
+
+    if (list && list.length && currentIndex >= 0) {
+        analyzed = analyzeEpisodeList(list);
+        current = analyzed.parsed[currentIndex];
+
+        if (current && current.episode) {
+            return {
+                episode: current.episode,
+                source: 'list-title'
+            };
+        }
+
+        inferred = inferEpisodeByIndex(currentIndex, analyzed);
+
+        if (inferred) {
+            return {
+                episode: inferred,
+                source: 'index-infer'
+            };
+        }
+    }
+
+    return {
+        episode: null,
+        source: 'unknown'
+    };
+}
+
+function analyzeEpisodeList(episodes) {
+    var parsed = [];
+    var valid = [];
+    var i;
+    var ep;
+    var title;
+    var url;
+    var episodeNum;
+    var item;
+    var inc = 0;
+    var dec = 0;
+    var order = 'unknown';
+    var nums = [];
+    var hasMissing = false;
+
+    for (i = 0; i < episodes.length; i++) {
+        ep = episodes[i] || {};
+        title = ep.name || ep.title || ep.label || '';
+        url = ep.url || ep.playUrl || '';
+
+        episodeNum = extractEpisode(title);
+
+        if (!episodeNum) {
+            episodeNum = extractEpisode(url);
+        }
+
+        item = {
+            index: i,
+            raw: ep,
+            title: title,
+            url: url,
+            episode: episodeNum,
+            isSpecial: isSpecialEpisode(title)
+        };
+
+        parsed.push(item);
+
+        if (episodeNum && !item.isSpecial) {
+            valid.push(item);
+            nums.push(episodeNum);
+        }
+    }
+
+    if (valid.length >= 2) {
+        for (i = 1; i < valid.length; i++) {
+            if (valid[i].episode > valid[i - 1].episode) {
+                inc++;
+            }
+            if (valid[i].episode < valid[i - 1].episode) {
+                dec++;
+            }
+        }
+
+        if (inc > dec) {
+            order = 'asc';
+        } else if (dec > inc) {
+            order = 'desc';
+        }
+
+        nums = sortNumberArray(nums);
+
+        for (i = 1; i < nums.length; i++) {
+            if (nums[i] - nums[i - 1] > 1) {
+                hasMissing = true;
+                break;
+            }
+        }
+    }
+
+    return {
+        order: order,
+        hasMissing: hasMissing,
+        parsed: parsed,
+        valid: valid
+    };
+}
+
+function inferEpisodeByIndex(currentIndex, analyzed) {
+    var valid;
+    var first;
+
+    if (!analyzed || analyzed.order === 'unknown') {
+        return null;
+    }
+
+    if (analyzed.hasMissing) {
+        return null;
+    }
+
+    valid = analyzed.valid;
+
+    if (!valid || !valid.length) {
+        return null;
+    }
+
+    first = valid[0].episode;
+
+    if (analyzed.order === 'asc') {
+        return first + currentIndex;
+    }
+
+    if (analyzed.order === 'desc') {
+        return first - currentIndex;
+    }
+
+    return null;
+}
+
+function buildKeywordList(title, season, episode, platform) {
+    var s = pad2(season);
+    var e = pad2(episode);
+    var list = [];
+
+    if (platform) {
+        list.push(title + ' S' + s + 'E' + e + ' @' + platform);
+    }
+
+    list.push(title + ' S' + s + 'E' + e);
+    list.push(title + '.S' + s + 'E' + e + '.mp4');
+    list.push(title + ' 第' + season + '季 第' + episode + '集');
+    list.push(title + ' 第' + episode + '集');
+
+    return uniqueArray(list);
+}
+
+async function searchByMultiDanmuApi(apiBases, keyword) {
+    var i;
+    var danmu;
+
+    for (i = 0; i < apiBases.length; i++) {
+        try {
+            danmu = await searchByDanmuApi(apiBases[i], keyword);
+            if (danmu && danmu.length > 0) {
+                return danmu;
+            }
+        } catch (e) {}
+    }
+
+    return [];
+}
+
+async function searchByDanmuApi(apiBase, keyword) {
+    var matched;
+    var danmu;
+
+    matched = await callDanmuApiMatch(apiBase, keyword);
+
+    if (!matched || !matched.ok || !matched.commentId) {
+        return [];
+    }
+
+    danmu = await callDanmuApiComment(apiBase, matched.commentId);
+
+    if (danmu && danmu.length > 0) {
+        return danmu;
+    }
+
+    return [];
+}
+
+async function callDanmuApiMatch(apiBase, keyword) {
+    var url = apiBase + '/api/v2/match';
+    var bodies = [];
+    var i;
+    var res;
+    var json;
+    var commentId;
+
+    bodies.push({
+        fileName: keyword,
+        fileHash: '',
+        fileSize: 0,
+        videoDuration: 0,
+        matchMode: 'hashAndFileName'
+    });
+
+    bodies.push({
+        fileName: keyword
+    });
+
+    bodies.push({
+        keyword: keyword
+    });
+
+    for (i = 0; i < bodies.length; i++) {
+        try {
+            res = await req(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'User-Agent': 'Mozilla/5.0'
+                },
+                data: JSON.stringify(bodies[i])
+            });
+
+            json = safeJsonParse(res && res.data ? res.data : res);
+            commentId = pickCommentIdFromMatch(json);
+
+            if (commentId) {
+                return {
+                    ok: true,
+                    commentId: commentId,
+                    raw: json
+                };
+            }
+        } catch (e) {}
+    }
+
+    return {
+        ok: false,
+        commentId: '',
+        raw: null
+    };
+}
+
+async function callDanmuApiComment(apiBase, commentId) {
+    var url = apiBase + '/api/v2/comment/' + encodeURIComponent(commentId) + '?format=json&duration=true';
+    var res;
+    var json;
+
+    res = await req(url, {
+        method: 'GET',
+        headers: {
+            'User-Agent': 'Mozilla/5.0'
+        }
+    });
+
+    json = safeJsonParse(res && res.data ? res.data : res);
+
+    return convertDanmuApiJsonToUz(json);
+}
+
+async function callMultiFongmiFallback(apiBases, title, episode) {
+    var i;
+    var list;
+
+    for (i = 0; i < apiBases.length; i++) {
+        try {
+            list = await callFongmiFallback(apiBases[i], title, episode);
+            if (list && list.length > 0) {
+                return list;
+            }
+        } catch (e) {}
+    }
+
+    return [];
+}
+
+async function callFongmiFallback(apiBase, title, episode) {
+    var urls = [];
+    var i;
+    var res;
+    var json;
+    var list;
+
+    urls.push(apiBase + '/api/v2/fongmi/danmaku?name=' + encodeURIComponent(title) + '&episode=' + encodeURIComponent(episode) + '&format=json');
+    urls.push(apiBase + '/danmaku/api/v2/fongmi/danmaku?name=' + encodeURIComponent(title) + '&episode=' + encodeURIComponent(episode) + '&format=json');
+
+    for (i = 0; i < urls.length; i++) {
+        try {
+            res = await req(urls[i], {
+                method: 'GET',
+                headers: {
+                    'User-Agent': 'Mozilla/5.0'
+                }
+            });
+
+            json = safeJsonParse(res && res.data ? res.data : res);
+            list = convertDanmuApiJsonToUz(json);
+
+            if (list && list.length > 0) {
+                return list;
+            }
+        } catch (e) {}
+    }
+
+    return [];
+}
+
+function pickCommentIdFromMatch(json) {
+    var m;
+
+    if (!json) {
+        return '';
+    }
+
+    if (json.data) {
+        if (json.data.commentId) {
+            return json.data.commentId;
+        }
+
+        if (json.data.episodeId) {
+            return json.data.episodeId;
+        }
+
+        if (json.data.id) {
+            return json.data.id;
+        }
+
+        if (json.data.matches && json.data.matches.length > 0) {
+            m = json.data.matches[0];
+            return m.commentId || m.episodeId || m.id || '';
+        }
+
+        if (isArray(json.data) && json.data.length > 0) {
+            m = json.data[0];
+            return m.commentId || m.episodeId || m.id || '';
+        }
+    }
+
+    if (json.matches && json.matches.length > 0) {
+        m = json.matches[0];
+        return m.commentId || m.episodeId || m.id || '';
+    }
+
+    if (json.match && json.match.length > 0) {
+        m = json.match[0];
+        return m.commentId || m.episodeId || m.id || '';
+    }
+
+    return json.commentId || json.episodeId || json.id || '';
+}
+
+function convertDanmuApiJsonToUz(json) {
+    var list;
+    var result = [];
+    var i;
+    var item;
+    var text;
+    var time;
+    var color;
+    var type;
+    var pInfo;
+
+    if (!json) {
+        return [];
+    }
+
+    if (isArray(json)) {
+        list = json;
+    } else {
+        list = json.comments || json.data || json.danmu || json.danmaku || json.comment || [];
+    }
+
+    if (!isArray(list)) {
+        return [];
+    }
+
+    for (i = 0; i < list.length; i++) {
+        item = list[i] || {};
+
+        pInfo = parsePField(item.p);
+
+        text = item.text || item.m || item.message || item.content || item.msg || '';
+
+        if (!text) {
+            continue;
+        }
+
+        time = item.time;
+
+        if (time === undefined || time === null || time === '') {
+            time = item.progress;
+        }
+
+        if (time === undefined || time === null || time === '') {
+            time = item.position;
+        }
+
+        if (time === undefined || time === null || time === '') {
+            time = item.vpos;
+        }
+
+        if ((time === undefined || time === null || time === '') && pInfo) {
+            time = pInfo.time;
+        }
+
+        color = item.color || item.c || 16777215;
+
+        if (pInfo && pInfo.color) {
+            color = pInfo.color;
+        }
+
+        type = item.type || item.mode || item.ct || 1;
+
+        if (pInfo && pInfo.type) {
+            type = pInfo.type;
+        }
+
+        result.push({
+            time: normalizeDanmuTime(time),
+            text: String(text),
+            color: normalizeColor(color),
+            type: normalizeDanmuType(type)
+        });
+    }
+
+    return result;
+}
+
+function parsePField(p) {
+    var parts;
+
+    if (!p) {
+        return null;
+    }
+
+    parts = String(p).split(',');
+
+    if (parts.length < 4) {
+        return null;
+    }
+
+    return {
+        time: parts[0],
+        type: parts[1],
+        color: parts[3]
+    };
+}
+
+function normalizeDanmuTime(t) {
+    var n = Number(t || 0);
+
+    if (n > 10000) {
+        return n / 1000;
+    }
+
+    return n;
+}
+
+function normalizeColor(color) {
+    var n;
+    var hex;
+
+    if (typeof color === 'string') {
+        if (startsWith(color, '#')) {
+            return color;
+        }
+
+        n = parseInt(color, 10);
+
+        if (isNaN(n)) {
+            return '#ffffff';
+        }
+    } else {
+        n = Number(color || 16777215);
+    }
+
+    hex = n.toString(16);
+
+    while (hex.length < 6) {
+        hex = '0' + hex;
+    }
+
+    if (hex.length > 6) {
+        hex = hex.substring(hex.length - 6);
+    }
+
+    return '#' + hex;
+}
+
+function normalizeDanmuType(type) {
+    var n = Number(type || 1);
+
+    if (n === 4) {
+        return 4;
+    }
+
+    if (n === 5) {
+        return 5;
+    }
+
+    return 1;
+}
+
+function cleanVideoTitle(rawTitle) {
+    var title = String(rawTitle || '').trim();
+
+    if (!title) {
+        return '';
+    }
+
+    title = removeBracketContent(title, '[', ']');
+    title = removeBracketContent(title, '【', '】');
+    title = removeBracketContent(title, '(', ')');
+    title = removeBracketContent(title, '（', '）');
+
+    title = replaceAllText(title, '_', ' ');
+    title = replaceAllText(title, '-', ' ');
+    title = replaceAllText(title, '.', ' ');
+
+    title = removeQualityWords(title);
+    title = removeSeasonEpisodeWords(title);
+
+    title = compactSpaces(title);
+
+    return title;
+}
+
+function removeQualityWords(title) {
+    var words = [
+        '4K',
+        '8K',
+        '1080P',
+        '720P',
+        '2160P',
+        'HD',
+        'BD',
+        'WEB-DL',
+        'WEBRip',
+        'HDR',
+        'HEVC',
+        'H264',
+        'H265',
+        'H.264',
+        'H.265',
+        '国语',
+        '国配',
+        '粤语',
+        '中字',
+        '中文字幕',
+        '简中',
+        '繁中',
+        '内嵌',
+        '无删减',
+        '全集',
+        '完结',
+        '更新至',
+        '更至'
+    ];
+
+    var i;
+
+    for (i = 0; i < words.length; i++) {
+        title = replaceAllTextIgnoreCase(title, words[i], ' ');
+    }
+
+    return title;
+}
+
+function removeSeasonEpisodeWords(title) {
+    title = removeChineseSeason(title);
+    title = removeChineseEpisode(title);
+    title = removeSEPatternText(title);
+    return title;
+}
+
+function removeChineseSeason(title) {
+    var start;
+    var end;
+    var left;
+    var right;
+
+    while (true) {
+        start = title.indexOf('第');
+        if (start < 0) {
+            break;
+        }
+
+        end = title.indexOf('季', start + 1);
+
+        if (end < 0) {
+            break;
+        }
+
+        left = title.substring(0, start);
+        right = title.substring(end + 1);
+        title = left + ' ' + right;
+    }
+
+    return title;
+}
+
+function removeChineseEpisode(title) {
+    var start;
+    var end;
+    var chars = ['集', '话', '話', '回'];
+    var i;
+    var foundEnd;
+    var left;
+    var right;
+
+    while (true) {
+        start = title.indexOf('第');
+        if (start < 0) {
+            break;
+        }
+
+        foundEnd = -1;
+
+        for (i = 0; i < chars.length; i++) {
+            end = title.indexOf(chars[i], start + 1);
+            if (end >= 0 && (foundEnd < 0 || end < foundEnd)) {
+                foundEnd = end;
+            }
+        }
+
+        if (foundEnd < 0) {
+            break;
+        }
+
+        left = title.substring(0, start);
+        right = title.substring(foundEnd + 1);
+        title = left + ' ' + right;
+    }
+
+    return title;
+}
+
+function removeSEPatternText(title) {
+    var lower = title.toLowerCase();
+    var sIndex;
+    var eIndex;
+    var endIndex;
+    var left;
+    var right;
+
+    while (true) {
+        lower = title.toLowerCase();
+        sIndex = lower.indexOf('s');
+
+        if (sIndex < 0) {
+            break;
+        }
+
+        if (!isDigit(charAtSafe(lower, sIndex + 1)) && charAtSafe(lower, sIndex + 1) !== ' ') {
+            break;
+        }
+
+        eIndex = lower.indexOf('e', sIndex + 1);
+
+        if (eIndex < 0) {
+            break;
+        }
+
+        endIndex = eIndex + 1;
+
+        while (endIndex < title.length && isDigit(charAtSafe(title, endIndex))) {
+            endIndex++;
+        }
+
+        left = title.substring(0, sIndex);
+        right = title.substring(endIndex);
+        title = left + ' ' + right;
+    }
+
+    return title;
+}
+
+function extractSeason(text) {
+    var t = String(text || '');
+    var n;
+
+    n = extractSeasonByS(t);
+    if (n) {
+        return n;
+    }
+
+    n = extractChineseNumberBetween(t, '第', '季');
+    if (n) {
+        return n;
+    }
+
+    n = extractNumberAfterWordIgnoreCase(t, 'season');
+    if (n) {
+        return n;
+    }
+
+    return 1;
+}
+
+function extractEpisode(text) {
+    var t = String(text || '');
+    var n;
+
+    n = extractEpisodeBySE(t);
+    if (n) {
+        return n;
+    }
+
+    n = extractNumberAfterWordIgnoreCase(t, 'ep');
+    if (n) {
+        return n;
+    }
+
+    n = extractNumberAfterWordIgnoreCase(t, 'e');
+    if (n) {
+        return n;
+    }
+
+    n = extractChineseEpisodeNumber(t);
+    if (n) {
+        return n;
+    }
+
+    n = extractLastSmallNumber(t);
+    if (n) {
+        return n;
+    }
+
+    return null;
+}
+
+function extractSeasonByS(text) {
+    var lower = String(text || '').toLowerCase();
+    var i;
+    var ch;
+    var num;
+
+    for (i = 0; i < lower.length; i++) {
+        ch = lower.charAt(i);
+
+        if (ch === 's') {
+            num = readNumberForward(lower, i + 1);
+            if (num && num.value > 0 && num.value < 100) {
+                return num.value;
+            }
+        }
+    }
+
+    return null;
+}
+
+function extractEpisodeBySE(text) {
+    var lower = String(text || '').toLowerCase();
+    var i;
+    var ch;
+    var sFound = false;
+    var num;
+
+    for (i = 0; i < lower.length; i++) {
+        ch = lower.charAt(i);
+
+        if (ch === 's') {
+            num = readNumberForward(lower, i + 1);
+            if (num) {
+                sFound = true;
+                i = num.end;
+            }
+        }
+
+        if (sFound && lower.charAt(i) === 'e') {
+            num = readNumberForward(lower, i + 1);
+            if (num && num.value > 0 && num.value < 1000) {
+                return num.value;
+            }
+        }
+    }
+
+    return null;
+}
+
+function extractChineseEpisodeNumber(text) {
+    var t = String(text || '');
+    var start;
+    var end;
+    var part;
+    var n;
+    var chars = ['集', '话', '話', '回'];
+    var i;
+    var foundEnd;
+
+    start = t.indexOf('第');
+
+    if (start < 0) {
+        return null;
+    }
+
+    foundEnd = -1;
+
+    for (i = 0; i < chars.length; i++) {
+        end = t.indexOf(chars[i], start + 1);
+        if (end >= 0 && (foundEnd < 0 || end < foundEnd)) {
+            foundEnd = end;
+        }
+    }
+
+    if (foundEnd < 0) {
+        return null;
+    }
+
+    part = t.substring(start + 1, foundEnd);
+    n = cnNumToInt(part);
+
+    return n;
+}
+
+function extractChineseNumberBetween(text, leftMark, rightMark) {
+    var t = String(text || '');
+    var start = t.indexOf(leftMark);
+    var end;
+    var part;
+
+    if (start < 0) {
+        return null;
+    }
+
+    end = t.indexOf(rightMark, start + 1);
+
+    if (end < 0) {
+        return null;
+    }
+
+    part = t.substring(start + 1, end);
+
+    return cnNumToInt(part);
+}
+
+function extractNumberAfterWordIgnoreCase(text, word) {
+    var lower = String(text || '').toLowerCase();
+    var w = String(word || '').toLowerCase();
+    var index = lower.indexOf(w);
+    var num;
+
+    if (index < 0) {
+        return null;
+    }
+
+    num = readNumberForward(lower, index + w.length);
+
+    if (num && num.value > 0) {
+        return num.value;
+    }
+
+    return null;
+}
+
+function extractLastSmallNumber(text) {
+    var t = String(text || '');
+    var i;
+    var nums = [];
+    var current = '';
+
+    for (i = 0; i < t.length; i++) {
+        if (isDigit(t.charAt(i))) {
+            current = current + t.charAt(i);
+        } else {
+            if (current) {
+                nums.push(parseInt(current, 10));
+                current = '';
+            }
+        }
+    }
+
+    if (current) {
+        nums.push(parseInt(current, 10));
+    }
+
+    if (nums.length < 1) {
+        return null;
+    }
+
+    for (i = nums.length - 1; i >= 0; i--) {
+        if (nums[i] > 0 && nums[i] < 1000) {
+            return nums[i];
+        }
+    }
+
+    return null;
+}
+
+function readNumberForward(text, startIndex) {
+    var i = startIndex;
+    var s = '';
+
+    while (i < text.length && text.charAt(i) === ' ') {
+        i++;
+    }
+
+    while (i < text.length && isDigit(text.charAt(i))) {
+        s = s + text.charAt(i);
+        i++;
+    }
+
+    if (!s) {
+        return null;
+    }
+
+    return {
+        value: parseInt(s, 10),
+        end: i
+    };
+}
+
+function cnNumToInt(str) {
+    var s = String(str || '').trim();
+    var map;
+    var i;
+    var ch;
+    var num;
+    var parts;
+    var tens;
+    var ones;
+
+    if (!s) {
+        return null;
+    }
+
+    num = toPositiveInt(s);
+
+    if (num) {
+        return num;
+    }
+
+    map = {
+        '零': 0,
+        '〇': 0,
+        '一': 1,
+        '二': 2,
+        '两': 2,
+        '三': 3,
+        '四': 4,
+        '五': 5,
+        '六': 6,
+        '七': 7,
+        '八': 8,
+        '九': 9,
+        '十': 10
+    };
+
+    if (s === '十') {
+        return 10;
+    }
+
+    if (s.indexOf('十') >= 0) {
+        parts = s.split('十');
+        tens = parts[0] ? map[parts[0]] : 1;
+        ones = parts[1] ? map[parts[1]] : 0;
+
+        if (tens === undefined || ones === undefined) {
+            return null;
+        }
+
+        return tens * 10 + ones;
+    }
+
+    num = 0;
+
+    for (i = 0; i < s.length; i++) {
+        ch = s.charAt(i);
+
+        if (map[ch] === undefined) {
+            return null;
+        }
+
+        num = num * 10 + map[ch];
+    }
+
+    return num;
+}
+
+function isEpisodeOnly(title) {
+    var t = String(title || '').trim();
+    var clean = removeChineseEpisode(t);
+
+    clean = compactSpaces(clean);
+
+    if (!clean) {
+        return true;
+    }
+
+    if (toPositiveInt(clean)) {
+        return true;
+    }
+
+    return false;
+}
+
+function isSpecialEpisode(title) {
+    var t = String(title || '');
+
+    if (containsAny(t, ['预告', '花絮', '彩蛋', '特辑', '番外', '先导', '幕后', '加更', '会员版', '纯享', '看点', '速看', '解说', '影评'])) {
+        return true;
+    }
+
+    return false;
+}
+
+function detectPlatform(sp) {
+    var text = '';
+
+    if (sp) {
+        text = joinText([
+            sp.videoUrl,
+            sp.url,
+            sp.playUrl,
+            sp.line,
+            sp.videoPlatformName
+        ]).toLowerCase();
+    }
+
+    if (containsAny(text, ['iqiyi', 'qiyi', '爱奇艺'])) {
+        return 'qiyi';
+    }
+
+    if (containsAny(text, ['qq.com', 'v.qq', '腾讯'])) {
+        return 'qq';
+    }
+
+    if (containsAny(text, ['youku', '优酷'])) {
+        return 'youku';
+    }
+
+    if (containsAny(text, ['mgtv', 'imgo', '芒果'])) {
+        return 'imgo';
+    }
+
+    if (containsAny(text, ['bilibili', 'b站', '哔哩'])) {
+        return 'bilibili1';
+    }
+
+    if (containsAny(text, ['migu', '咪咕'])) {
+        return 'migu';
+    }
+
+    if (containsAny(text, ['sohu', '搜狐'])) {
+        return 'sohu';
+    }
+
+    if (containsAny(text, ['leshi', '乐视', 'le.com'])) {
+        return 'leshi';
+    }
+
+    if (containsAny(text, ['xigua', '西瓜'])) {
+        return 'xigua';
+    }
+
+    return '';
+}
+
+function safeJsonParse(text) {
+    try {
+        if (typeof text === 'object') {
+            return text;
+        }
+
+        return JSON.parse(String(text || '{}'));
+    } catch (e) {
+        return null;
+    }
+}
+
+function pad2(n) {
+    n = parseInt(n, 10);
+
+    if (!n || n < 1) {
+        return '01';
+    }
+
+    if (n < 10) {
+        return '0' + n;
+    }
+
+    return String(n);
+}
+
+function toPositiveInt(value) {
+    var n = parseInt(String(value || '').trim(), 10);
+
+    if (isNaN(n) || n < 1) {
+        return null;
+    }
+
+    return n;
+}
+
+function isDigit(ch) {
+    return ch >= '0' && ch <= '9';
+}
+
+function charAtSafe(text, index) {
+    if (index < 0 || index >= text.length) {
+        return '';
+    }
+
+    return text.charAt(index);
+}
+
+function startsWith(text, prefix) {
+    text = String(text || '');
+    prefix = String(prefix || '');
+
+    return text.indexOf(prefix) === 0;
+}
+
+function endsWithIgnoreCase(text, suffix) {
+    var a = String(text || '').toLowerCase();
+    var b = String(suffix || '').toLowerCase();
+
+    if (b.length > a.length) {
+        return false;
+    }
+
+    return a.substring(a.length - b.length) === b;
+}
+
+function replaceAllText(text, search, replacement) {
+    return String(text || '').split(search).join(replacement);
+}
+
+function replaceAllTextIgnoreCase(text, search, replacement) {
+    var source = String(text || '');
+    var lower = source.toLowerCase();
+    var target = String(search || '').toLowerCase();
+    var index;
+    var result = '';
+    var last = 0;
+
+    if (!target) {
+        return source;
+    }
+
+    while (true) {
+        index = lower.indexOf(target, last);
+
+        if (index < 0) {
+            result = result + source.substring(last);
+            break;
+        }
+
+        result = result + source.substring(last, index) + replacement;
+        last = index + target.length;
+    }
+
+    return result;
+}
+
+function compactSpaces(text) {
+    var s = String(text || '');
+    var result = '';
+    var i;
+    var ch;
+    var lastSpace = false;
+
+    for (i = 0; i < s.length; i++) {
+        ch = s.charAt(i);
+
+        if (ch === ' ' || ch === '\t' || ch === '\r' || ch === '\n') {
+            if (!lastSpace) {
+                result = result + ' ';
+                lastSpace = true;
+            }
+        } else {
+            result = result + ch;
+            lastSpace = false;
+        }
+    }
+
+    return result.trim();
+}
+
+function removeBracketContent(text, left, right) {
+    var s = String(text || '');
+    var start;
+    var end;
+
+    while (true) {
+        start = s.indexOf(left);
+        if (start < 0) {
+            break;
+        }
+
+        end = s.indexOf(right, start + 1);
+        if (end < 0) {
+            break;
+        }
+
+        s = s.substring(0, start) + ' ' + s.substring(end + 1);
+    }
+
+    return s;
+}
+
+function containsAny(text, words) {
+    var i;
+    var t = String(text || '');
+
+    for (i = 0; i < words.length; i++) {
+        if (t.indexOf(words[i]) >= 0) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+function joinText(arr) {
+    var result = '';
+    var i;
+
+    for (i = 0; i < arr.length; i++) {
+        if (arr[i] !== undefined && arr[i] !== null && String(arr[i]) !== '') {
+            if (result) {
+                result = result + ' ';
+            }
+
+            result = result + String(arr[i]);
+        }
+    }
+
+    return result;
+}
+
+function uniqueArray(arr) {
+    var result = [];
+    var i;
+    var j;
+    var exists;
+    var value;
+
+    for (i = 0; i < arr.length; i++) {
+        value = String(arr[i] || '').trim();
+
+        if (!value) {
+            continue;
+        }
+
+        exists = false;
+
+        for (j = 0; j < result.length; j++) {
+            if (result[j] === value) {
+                exists = true;
+                break;
+            }
+        }
+
+        if (!exists) {
+            result.push(value);
+        }
+    }
+
+    return result;
+}
+
+function isArray(obj) {
+    if (Array.isArray) {
+        return Array.isArray(obj);
+    }
+
+    return Object.prototype.toString.call(obj) === '[object Array]';
+}
+
+function sortNumberArray(arr) {
+    var a = [];
+    var i;
+    var j;
+    var tmp;
+
+    for (i = 0; i < arr.length; i++) {
+        a.push(arr[i]);
+    }
+
+    for (i = 0; i < a.length; i++) {
+        for (j = i + 1; j < a.length; j++) {
+            if (a[j] < a[i]) {
+                tmp = a[i];
+                a[i] = a[j];
+                a[j] = tmp;
+            }
+        }
+    }
+
+    return a;
 }
