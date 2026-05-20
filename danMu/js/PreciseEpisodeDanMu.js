@@ -87,31 +87,6 @@ function getField(obj, keys) {
 
 
 
-function safeGetEnv(key) {
-    key = normalizeText(key)
-    if (!key) return ''
-
-    if (typeof getEnv !== 'function') return ''
-
-    const tag = normalizeText(appConfig.uzTag || appConfig._uzTag || '')
-
-    // 重点：只保留这个方向，避免把 uzTag 当环境变量名读取
-    try {
-        const value = getEnv(key, tag)
-        const text = envValueToText(value, key)
-        if (text) return text
-    } catch (e) {}
-
-    // 兼容部分旧版运行时：只传 key
-    try {
-        const value = getEnv(key)
-        const text = envValueToText(value, key)
-        if (text) return text
-    } catch (e) {}
-
-    return ''
-}
-
 function envValueToText(value, key) {
     if (value === undefined || value === null) return ''
 
@@ -167,22 +142,17 @@ function safeGetEnv(key) {
 
     const tag = normalizeText(appConfig.uzTag || appConfig._uzTag || '')
 
-    // uz 模板里原本就是 getEnv(appConfig.uzTag, key)，所以这里必须 tag 在前、key 在后。
+    // 只使用 uz 模板要求的调用方式：getEnv(uzTag, key)
+    // 不再尝试 getEnv(key) 或 getEnv(key, tag)，避免触发“未声明环境变量”红色提示。
     try {
         const value = getEnv(tag, key)
         const text = envValueToText(value, key)
         if (text) return text
     } catch (e) {}
 
-    // 少数旧环境可能不需要 tag，作为兜底。
-    try {
-        const value = getEnv(key)
-        const text = envValueToText(value, key)
-        if (text) return text
-    } catch (e) {}
-
     return ''
 }
+
 
 
 
