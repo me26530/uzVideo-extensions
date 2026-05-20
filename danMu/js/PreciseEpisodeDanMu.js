@@ -1,13 +1,11 @@
-// ignore
-//@name:精准集数弹幕
-//@version:5
-//@type:400
-//@remark:精准识别播放集数；环境变量API优先覆盖内置；修复JSC正则安装错误；显示实际API地址；弹幕数量校验；匹配信息提示；修复多结果误取第一个导致花絮/剧场版误配
-//@env:精准弹幕API##可选，兼容 dandanPlay API。格式：线路名@https://api.example.com|线路2@https://api2.example.com&&最小弹幕数量##可选，默认 1
-//@order:A00
-//@isAV:0
-//@deprecated:0
-// ignore
+// @name:精准集数弹幕
+// @version:5
+// @type:400
+// @remark:精准识别播放集数；环境变量API优先覆盖内置；修复JSC正则安装错误；显示实际API地址；弹幕数量校验；匹配信息提示；修复多结果误取第一个导致花絮/剧场版误配
+// @env:精准弹幕API##可选，兼容 dandanPlay API。格式：线路名@https://api.example.com|线路2@https://api2.example.com&&最小弹幕数量##可选，默认 1
+// @order:A00
+// @isAV:0
+// @deprecated:0
 
 /*
  * danMu type:400 严格接口说明：
@@ -233,8 +231,9 @@ function parseEpisodeFromUrl(url) {
     if (!url) return null
 
     const patterns = [
-        /?:episode|ep|e|index|nid|vidIndex|play|page=(\d{1,4})(?:\D|$)/i,
-        /\/(?:episode|episodes|ep|e)\/(\d{1,4})(?:[/?#]|$)/i,
+        // 支持 query 参数形式和路径形式，使用非捕获分组并允许多种分隔符
+        /(?:episode|episodes|ep|e|index|nid|vidIndex|play)[=\/\-]?(\d{1,4})(?:\D|$)/i,
+        /\/(?:episode|episodes|ep|e)\/(\d{1,4})(?:[\/?#]|$)/i,
         /(?:episode|episodes|ep|e)[-_]?(\d{1,4})(?:\D|$)/i,
         /\/(\d{1,4})\.html(?:[?#].*)?$/i,
         /第\s*(\d{1,4})\s*[集话話回]/,
@@ -283,9 +282,9 @@ function cleanEnglishRomanTitle(title) {
         .replace(/\bCR\b/gi, '')
         .replace(/\bAMZN\b/gi, '')
         .replace(/\bNF\b/gi, '')
-        .replace(/$$[^$$]*\]/g, '')
+        // 安全处理 $$...$$ 自定义标记（非贪婪）
+        .replace(/\$\$[\s\S]*?\$\$/g, '')
         .replace(/【[^】]*】/g, '')
-        .replace(/$$[^)]*$$/g, '')
         .replace(/（[^）]*）/g, '')
         .replace(/[._-]+/g, ' ')
         .replace(/\s+/g, ' ')
@@ -303,9 +302,9 @@ function cleanClickedTitle(title) {
         .replace(/EP\s*\.?\s*\d{1,4}/gi, '')
         .replace(/Episode\s*\.?\s*\d{1,4}/gi, '')
         .replace(/更新至\s*\d{1,4}\s*[集话話回]/g, '')
-        .replace(/$$[^$$]*\]/g, '')
+        // 安全处理 $$...$$ 自定义标记（非贪婪）
+        .replace(/\$\$[\s\S]*?\$\$/g, '')
         .replace(/【[^】]*】/g, '')
-        .replace(/$$[^)]*$$/g, '')
         .replace(/（[^）]*）/g, '')
         .replace(/\s+/g, ' ')
         .trim()
