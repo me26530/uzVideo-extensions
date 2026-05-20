@@ -85,11 +85,79 @@ function getField(obj, keys) {
     return ''
 }
 
+function envValueToText(value, key) {
+    if (value === undefined || value === null) return ''
+
+    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+        return normalizeText(value)
+    }
+
+    if (typeof value === 'object') {
+        try {
+            if (value.data !== undefined && value.data !== null) {
+                const text = envValueToText(value.data, key)
+                if (text) return text
+            }
+        } catch (e) {}
+
+        try {
+            if (value.value !== undefined && value.value !== null) {
+                const text = envValueToText(value.value, key)
+                if (text) return text
+            }
+        } catch (e) {}
+
+        try {
+            if (value.val !== undefined && value.val !== null) {
+                const text = envValueToText(value.val, key)
+                if (text) return text
+            }
+        } catch (e) {}
+
+        try {
+            if (value.result !== undefined && value.result !== null) {
+                const text = envValueToText(value.result, key)
+                if (text) return text
+            }
+        } catch (e) {}
+
+        try {
+            if (key && value[key] !== undefined && value[key] !== null) {
+                const text = envValueToText(value[key], key)
+                if (text) return text
+            }
+        } catch (e) {}
+
+        try {
+            if (value.env && key && value.env[key] !== undefined && value.env[key] !== null) {
+                const text = envValueToText(value.env[key], key)
+                if (text) return text
+            }
+        } catch (e) {}
+    }
+
+    return ''
+}
+
 function safeGetEnv(key) {
     key = normalizeText(key)
     if (!key) return ''
 
-    if (typeof getEnv !== 'function') return ''
+    let fn = null
+
+    try {
+        if (typeof getEnv === 'function') fn = getEnv
+    } catch (e) {}
+
+    if (!fn) {
+        try {
+            if (typeof globalThis !== 'undefined' && typeof globalThis.getEnv === 'function') {
+                fn = globalThis.getEnv
+            }
+        } catch (e) {}
+    }
+
+    if (!fn) return ''
 
     const tags = []
 
@@ -106,21 +174,46 @@ function safeGetEnv(key) {
     tags.push(undefined)
 
     for (let i = 0; i < tags.length; i++) {
+        const tag = tags[i]
+
         try {
-            const value = getEnv(tags[i], key)
-            const text = normalizeText(value)
+            const value = fn(tag, key)
+            const text = envValueToText(value, key)
+            if (text) return text
+        } catch (e) {}
+
+        try {
+            const value = fn(key, tag)
+            const text = envValueToText(value, key)
+            if (text) return text
+        } catch (e) {}
+
+        try {
+            const map = fn(tag)
+            const text = envValueToText(map, key)
             if (text) return text
         } catch (e) {}
     }
 
     try {
-        const value = getEnv(key)
-        const text = normalizeText(value)
+        const value = fn(key)
+        const text = envValueToText(value, key)
+        if (text) return text
+    } catch (e) {}
+
+    try {
+        const value = fn({
+            key: key,
+            uzTag: appConfig.uzTag,
+            tag: appConfig.uzTag,
+        })
+        const text = envValueToText(value, key)
         if (text) return text
     } catch (e) {}
 
     return ''
 }
+
 
 
 function getMinDanmuCount() {
@@ -654,33 +747,59 @@ function buildApiUrl(api, path) {
 
 function parseCustomApis() {
     const result = []
-    const env = safeGetEnv('精准弹幕API')
+
+    let env =
+        safeGetEnv('精准弹幕API') ||
+        safeGetEnv('精准弹幕api') ||
+        safeGetEnv('弹幕API') ||
+        safeGetEnv('弹幕api') ||
+        safeGetEnv('danmu_api') ||
+        safeGetEnv('DANMU_API')
+
+    env = normalizeText(env)
+
     if (!env) return result
 
+    env = env
+        .replace(/^精准弹幕API\s*[:=：]\s*/i, '')
+        .replace(/^精准弹幕api\s*[:=：]\s*/i, '')
+        .replace(/^弹幕API\s*[:=：]\s*/i, '')
+        .replace(/^弹幕api\s*[:=：]\s*/i, '')
+        .trim()
+
     const parts = env
-        .split(/[|;]/)
+        .split(/[|；;]/)
         .map(function (x) {
-            return x.trim()
+            return normalizeText(x)
         })
         .filter(Boolean)
 
     for (let i = 0; i < parts.length; i++) {
-        const arr = parts[i].split('@')
-        if (arr.length >= 2) {
-            const name = normalizeText(arr.shift())
-            const base = normalizeApiBase(arr.join('@'))
+        let item = parts[i]
+        let name = ''
+        let base = ''
 
-            if (name && base) {
-                result.push({
-                    name: name,
-                    base: base,
-                })
-            }
+        const atIndex = item.indexOf('@')
+
+        if (atIndex > 0) {
+            name = normalizeText(item.substring(0, atIndex))
+            base = normalizeApiBase(item.substring(atIndex + 1))
+        } else {
+            name = '默认线路' + String(i + 1)
+            base = normalizeApiBase(item)
+        }
+
+        if (base) {
+            result.push({
+                name: name || '默认线路' + String(i + 1),
+                base: base,
+            })
         }
     }
 
     return result
 }
+
 
 function getApiConfigs(preferredName) {
     const apis = parseCustomApis()
@@ -1211,11 +1330,16 @@ async function searchByApis(titleCandidates, epInfo, item) {
     const apis = getApiConfigs(item.videoPlatformName || item.line)
 
     if (apis.length === 0) {
-        return {
-            list: [],
-            info: '失败；请先配置环境变量：精准弹幕API，格式：线路名@https://域名/TOKEN',
-        }
+    return {
+        list: [],
+        info:
+            '失败；未读取到环境变量 精准弹幕API。请确认已点击“确定”保存；当前uzTag=' +
+            normalizeText(appConfig.uzTag || appConfig._uzTag || '') +
+            '；getEnv类型=' +
+            (typeof getEnv),
     }
+}
+
 
     const errors = []
     let lastTried = ''
