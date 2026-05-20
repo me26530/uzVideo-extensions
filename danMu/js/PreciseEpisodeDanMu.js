@@ -135,6 +135,7 @@ function envValueToText(value, key) {
 }
 
 function safeGetEnv(key) {
+function safeGetEnv(key) {
     key = normalizeText(key)
     if (!key) return ''
 
@@ -142,16 +143,17 @@ function safeGetEnv(key) {
 
     const tag = normalizeText(appConfig.uzTag || appConfig._uzTag || '')
 
-    // 只使用 uz 模板要求的调用方式：getEnv(uzTag, key)
-    // 不再尝试 getEnv(key) 或 getEnv(key, tag)，避免触发“未声明环境变量”红色提示。
+    // 你的当前 uz 运行环境实际是：getEnv(环境变量名, uzTag)
+    // 只读取 JSON/env 中声明过的变量名，避免触发未声明环境变量提示。
     try {
-        const value = getEnv(tag, key)
+        const value = getEnv(key, tag)
         const text = envValueToText(value, key)
         if (text) return text
     } catch (e) {}
 
     return ''
 }
+
 
 
 
