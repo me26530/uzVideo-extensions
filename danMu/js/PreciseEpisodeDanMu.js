@@ -766,8 +766,8 @@ function parseCustomApis() {
         safeGetEnv('精准弹幕api') ||
         safeGetEnv('弹幕API') ||
         safeGetEnv('弹幕api') ||
-        safeGetEnv('danmu_api') ||
-        safeGetEnv('DANMU_API')
+        safeGetEnv('DANMU_API') ||
+        safeGetEnv('danmu_api')
 
     env = normalizeText(env)
 
@@ -788,7 +788,8 @@ function parseCustomApis() {
         .filter(Boolean)
 
     for (let i = 0; i < parts.length; i++) {
-        let item = parts[i]
+        const item = parts[i]
+
         let name = ''
         let base = ''
 
@@ -812,6 +813,7 @@ function parseCustomApis() {
 
     return result
 }
+
 
 
 function getApiConfigs(preferredName) {
