@@ -132,7 +132,7 @@ function envValueToText(value, key) {
     return ''
 }
 
-function safeGetEnv(key) {
+
 function safeGetEnv(key) {
     key = normalizeText(key)
     if (!key) return ''
