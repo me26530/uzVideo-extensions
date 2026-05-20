@@ -233,6 +233,7 @@ function parseEpisodeFromUrl(url) {
     const patterns = [
         // 支持 query 参数形式和路径形式，使用非捕获分组并允许多种分隔符
         /(?:episode|episodes|ep|e|index|nid|vidIndex|play)[=\/\-]?(\d{1,4})(?:\D|$)/i,
+        /page=(\d{1,4})(?:\D|$)/i,
         /\/(?:episode|episodes|ep|e)\/(\d{1,4})(?:[\/?#]|$)/i,
         /(?:episode|episodes|ep|e)[-_]?(\d{1,4})(?:\D|$)/i,
         /\/(\d{1,4})\.html(?:[?#].*)?$/i,
@@ -436,10 +437,31 @@ function normalizeApiBase(base) {
     return base
 }
 
+/**
+ * buildApiUrl
+ * - 支持 api.base 中包含 {TOKEN} 占位符
+ * - 支持环境变量 TOKEN 或 DANMU_TOKEN 自动拼接到 base（若 base 未包含 token）
+ * - 兼容内置 /api/v2 路径处理
+ */
 function buildApiUrl(api, path) {
     let base = normalizeApiBase(api.base)
     if (!base) return ''
 
+    // 获取 token（兼容多种环境变量名）
+    const token = normalizeText(safeGetEnv('TOKEN') || safeGetEnv('DANMU_TOKEN') || safeGetEnv('DANMU_API_TOKEN'))
+
+    // 如果 base 包含占位符 {TOKEN}，替换之
+    if (base.indexOf('{TOKEN}') >= 0) {
+        base = base.replace(/\{TOKEN\}/g, token || '')
+        base = base.replace(/\/+$/, '')
+    } else {
+        // 如果 base 看起来像没有 token 且我们有 token，则在 base 后追加 token 路段（避免重复 /api/v2）
+        if (token && !/\/api\/v2\/?$/.test(base) && !/\/\w{6,}\/?$/.test(base)) {
+            base = base + '/' + token
+        }
+    }
+
+    // 处理内置 api/v2 路径拼接（保持原有逻辑）
     if (base.endsWith('/api/v2')) {
         return base + path.replace(/^\/api\/v2/, '')
     }
