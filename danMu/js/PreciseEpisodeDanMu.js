@@ -1,7 +1,7 @@
 // @name:精准集数弹幕
-// @version:7
+// @version:8
 // @type:400
-// @remark:适配 huangxd-/danmu_api；仅使用环境变量API；修复JSC正则nothing to repeat；保留match；支持videoUrl直取；强制JSON；精准集数匹配
+// @remark:适配 huangxd-/danmu_api；仅使用环境变量API；修复重复safeGetEnv；保留match；支持videoUrl直取；强制JSON；精准集数匹配
 // @env:精准弹幕API##必填，格式：线路名@https://api.example.com/TOKEN|线路2@https://api2.example.com/TOKEN&&最小弹幕数量##可选，默认1
 // @order:A00
 // @isAV:0
@@ -85,8 +85,6 @@ function getField(obj, keys) {
     return ''
 }
 
-
-
 function envValueToText(value, key) {
     if (value === undefined || value === null) return ''
 
@@ -135,7 +133,6 @@ function envValueToText(value, key) {
 }
 
 function safeGetEnv(key) {
-function safeGetEnv(key) {
     key = normalizeText(key)
     if (!key) return ''
 
@@ -143,8 +140,8 @@ function safeGetEnv(key) {
 
     const tag = normalizeText(appConfig.uzTag || appConfig._uzTag || '')
 
-    // 你的当前 uz 运行环境实际是：getEnv(环境变量名, uzTag)
-    // 只读取 JSON/env 中声明过的变量名，避免触发未声明环境变量提示。
+    // 当前 uz 运行环境实际为：getEnv(环境变量名, uzTag)
+    // 不使用 getEnv(key) 兜底，避免触发“未在配置文件中声明环境变量”的红色提示。
     try {
         const value = getEnv(key, tag)
         const text = envValueToText(value, key)
@@ -153,10 +150,6 @@ function safeGetEnv(key) {
 
     return ''
 }
-
-
-
-
 
 function getMinDanmuCount() {
     const n = toNumberSafe(safeGetEnv('最小弹幕数量'))
@@ -412,10 +405,7 @@ function parseChineseEpisodeFromUrlText(text) {
                 break
             }
 
-            if (
-                isDigitCharForUrlParse(ch) ||
-                '零〇一二两三四五六七八九十百'.indexOf(ch) >= 0
-            ) {
+            if (isDigitCharForUrlParse(ch) || '零〇一二两三四五六七八九十百'.indexOf(ch) >= 0) {
                 part += ch
             } else if (part) {
                 break
@@ -435,17 +425,7 @@ function parseEpisodeFromUrl(url) {
 
     const tokens = tokenizeUrlForEpisodeParse(url)
 
-    const keys = [
-        'episodes',
-        'episode',
-        'vidindex',
-        'index',
-        'play',
-        'page',
-        'nid',
-        'ep',
-        'e',
-    ]
+    const keys = ['episodes', 'episode', 'vidindex', 'index', 'play', 'page', 'nid', 'ep', 'e']
 
     for (let i = 0; i < tokens.length; i++) {
         const token = tokens[i]
@@ -481,8 +461,6 @@ function parseEpisodeFromUrl(url) {
 
     return null
 }
-
-
 
 function cleanEnglishRomanTitle(title) {
     title = normalizeText(title)
@@ -567,15 +545,7 @@ function pickEpisodeInfo(item) {
     const p = item || {}
     const clickedTitle = normalizeText(getField(p, ['name', 'title', 'videoName', 'vodName']))
 
-    const titleText = [
-        p.name,
-        p.title,
-        p.videoName,
-        p.vodName,
-        p.originalTitle,
-        p.subTitle,
-        p.remark,
-    ]
+    const titleText = [p.name, p.title, p.videoName, p.vodName, p.originalTitle, p.subTitle, p.remark]
         .filter(Boolean)
         .join(' ')
 
@@ -673,8 +643,6 @@ function buildApiUrl(api, path) {
     let base = normalizeApiBase(api.base)
     if (!base) return ''
 
-    // 不再读取 TOKEN / DANMU_TOKEN / DANMU_API_TOKEN
-    // 因为这些变量没有在 JSON env 中声明，读取会触发未声明提示。
     if (base.endsWith('/api/v2')) {
         return base + path.replace(/^\/api\/v2/, '')
     }
@@ -682,21 +650,14 @@ function buildApiUrl(api, path) {
     return base + path
 }
 
-
-
 function parseCustomApis() {
     const result = []
-
-    // 只读取配置文件 env 中声明过的变量名
     let env = safeGetEnv('精准弹幕API')
-
     env = normalizeText(env)
 
     if (!env) return result
 
-    env = env
-        .replace(/^精准弹幕API\s*[:=：]\s*/i, '')
-        .trim()
+    env = env.replace(/^精准弹幕API\s*[:=：]\s*/i, '').trim()
 
     const parts = env
         .split(/[|；;]/)
@@ -707,10 +668,8 @@ function parseCustomApis() {
 
     for (let i = 0; i < parts.length; i++) {
         const item = parts[i]
-
         let name = ''
         let base = ''
-
         const atIndex = item.indexOf('@')
 
         if (atIndex > 0) {
@@ -731,8 +690,6 @@ function parseCustomApis() {
 
     return result
 }
-
-
 
 function getApiConfigs(preferredName) {
     const apis = parseCustomApis()
@@ -768,7 +725,6 @@ function parseDandanPlayComments(comments) {
 
         const t = Number(params[0] || element.time || element.position || element.at || 0)
         danMu.time = Number.isFinite(t) && t >= 0 ? t : 0
-
         danMu.color = normalizeText(params[2] || element.color || element.colour || '')
 
         list.push(danMu)
@@ -846,7 +802,6 @@ function scoreAnimeTitle(anchorTitle, animeTitle) {
 
 function pickBestEpisodeFromAnimes(animes, epInfo, anchorTitle) {
     animes = animes || []
-
     const targetEpisode = toNumberSafe(epInfo.episode)
     let best = null
     let bestScore = -1
@@ -876,7 +831,6 @@ function pickBestEpisodeFromAnimes(animes, epInfo, anchorTitle) {
             }
 
             if (isLikelySpecialEpisodeTitle(episodeTitle)) score -= 80
-
             score -= i * 2
             score -= j
 
@@ -923,22 +877,13 @@ function extractMatchEpisodeId(result) {
 
     if (direct) return normalizeText(direct)
 
-    const ep =
-        body.episode ||
-        body.matchedEpisode ||
-        body.selectedEpisode ||
-        (body.data && body.data.episode)
-
+    const ep = body.episode || body.matchedEpisode || body.selectedEpisode || (body.data && body.data.episode)
     if (ep) {
         const id = getEpisodeIdFromItem(ep)
         if (id) return id
     }
 
-    const match =
-        body.match ||
-        body.matched ||
-        (body.data && (body.data.match || body.data.matched))
-
+    const match = body.match || body.matched || (body.data && (body.data.match || body.data.matched))
     if (match) {
         const id = normalizeText(match.episodeId || match.commentId || match.id)
         if (id) return id
@@ -1031,10 +976,7 @@ async function matchByApi(api, queryText, epInfo) {
 
 async function getCommentsByApi(api, episodeId) {
     const locale = typeof kLocale === 'undefined' ? '' : normalizeText(kLocale)
-    const isSimplified =
-        locale.indexOf('CN') !== -1 ||
-        locale.indexOf('Hans') !== -1 ||
-        locale.indexOf('zh') !== -1
+    const isSimplified = locale.indexOf('CN') !== -1 || locale.indexOf('Hans') !== -1 || locale.indexOf('zh') !== -1
 
     const url = buildApiUrl(
         api,
@@ -1045,7 +987,6 @@ async function getCommentsByApi(api, episodeId) {
     )
 
     if (!url) return null
-
     return await req(url)
 }
 
@@ -1053,11 +994,7 @@ async function getCommentsByVideoUrl(api, videoUrl) {
     videoUrl = normalizeText(videoUrl)
     if (!videoUrl) return null
 
-    const url =
-        buildApiUrl(api, '/api/v2/comment') +
-        '?format=json&url=' +
-        encodeURIComponent(videoUrl)
-
+    const url = buildApiUrl(api, '/api/v2/comment') + '?format=json&url=' + encodeURIComponent(videoUrl)
     return await req(url)
 }
 
@@ -1104,7 +1041,6 @@ async function getVideoList(args) {
 
     try {
         args = args || {}
-
         const keyword = normalizeText(args.name || args.title || args.keyword || '')
 
         if (!keyword) {
@@ -1140,14 +1076,12 @@ async function getVideoList(args) {
 
                 for (let j = 0; j < found.length; j++) {
                     const anime = found[j] || {}
-
                     const video = new DanVideo()
                     video.vod_name = anime.animeTitle || anime.title || anime.name || keyword
                     video.vod_remarks = api.name + '@' + api.base + (anime.type ? ' · ' + anime.type : '')
                     video.extData = copyObject(anime)
                     video.extData.apiName = api.name
                     video.extData.apiBase = api.base
-
                     backData.data.push(video)
                 }
 
@@ -1188,7 +1122,6 @@ async function getVideoEpisodes(args) {
         for (let i = 0; i < episodes.length; i++) {
             const item = episodes[i] || {}
             const episode = new DanEpisode()
-
             const friendlyTitle = formatEpisodeTitle(item, i)
 
             const epNum =
@@ -1197,7 +1130,6 @@ async function getVideoEpisodes(args) {
                 parseEpisodeNumber(friendlyTitle)
 
             episode.vod_name = friendlyTitle
-
             episode.vod_remarks = [ext.apiName || '', item.type || '', item.duration ? String(item.duration) : '']
                 .filter(Boolean)
                 .join(' · ')
@@ -1259,24 +1191,21 @@ async function searchDanMu(item) {
 async function searchByApis(titleCandidates, epInfo, item) {
     const minCount = getMinDanmuCount()
     item = item || {}
-
     const apis = getApiConfigs(item.videoPlatformName || item.line)
 
     if (apis.length === 0) {
-    return {
-        list: [],
-        info:
-            '失败；未读取到环境变量 精准弹幕API。请确认已点击“确定”保存；当前uzTag=' +
-            normalizeText(appConfig.uzTag || appConfig._uzTag || '') +
-            '；getEnv类型=' +
-            (typeof getEnv),
+        return {
+            list: [],
+            info:
+                '失败；未读取到环境变量 精准弹幕API。请确认已点击“确定”保存；当前uzTag=' +
+                normalizeText(appConfig.uzTag || appConfig._uzTag || '') +
+                '；getEnv类型=' +
+                typeof getEnv,
+        }
     }
-}
-
 
     const errors = []
     let lastTried = ''
-
     const danEpisode = item.danEpisode || {}
     const danEpisodeExt = danEpisode.extData || {}
     const manualApiName = normalizeText(danEpisodeExt.apiName)
@@ -1355,11 +1284,7 @@ async function searchByApis(titleCandidates, epInfo, item) {
 
             if (!episodeId) {
                 if (!epInfo.episode) {
-                    lastTried =
-                        api.name +
-                        '@' +
-                        api.base +
-                        '：未识别集数，且match/videoUrl未获取到弹幕'
+                    lastTried = api.name + '@' + api.base + '：未识别集数，且match/videoUrl未获取到弹幕'
                     continue
                 }
 
@@ -1367,7 +1292,6 @@ async function searchByApis(titleCandidates, epInfo, item) {
 
                 for (let t = 0; t < titleCandidates.length && animes.length === 0; t++) {
                     matchedTitle = titleCandidates[t]
-
                     const searchResult = await searchEpisodesByApi(api, matchedTitle, epInfo.episode)
                     animes = getAnimesFromSearchResult(searchResult)
                 }
@@ -1402,7 +1326,6 @@ async function searchByApis(titleCandidates, epInfo, item) {
 
                 episodeId = picked.episodeId
                 matchedTitle = picked.animeTitle || matchedTitle
-
                 epInfo._matchedEpisodeTitle = picked.episodeTitle || ''
                 epInfo._matchedScore = picked.score || 0
             }
@@ -1460,10 +1383,7 @@ async function searchByApis(titleCandidates, epInfo, item) {
         }
     }
 
-    const info =
-        errors.length > 0
-            ? '失败跳过；' + errors.join('；') + '；最后=' + lastTried
-            : '失败；' + lastTried
+    const info = errors.length > 0 ? '失败跳过；' + errors.join('；') + '；最后=' + lastTried : '失败；' + lastTried
 
     return {
         list: [],
