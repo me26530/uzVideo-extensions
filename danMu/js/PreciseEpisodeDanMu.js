@@ -85,121 +85,7 @@ function getField(obj, keys) {
     return ''
 }
 
-function envValueToText(value, key) {
-    if (value === undefined || value === null) return ''
 
-    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
-        return normalizeText(value)
-    }
-
-    if (typeof value === 'object') {
-        try {
-            if (value.data !== undefined && value.data !== null) {
-                const text = envValueToText(value.data, key)
-                if (text) return text
-            }
-        } catch (e) {}
-
-        try {
-            if (value.value !== undefined && value.value !== null) {
-                const text = envValueToText(value.value, key)
-                if (text) return text
-            }
-        } catch (e) {}
-
-        try {
-            if (value.val !== undefined && value.val !== null) {
-                const text = envValueToText(value.val, key)
-                if (text) return text
-            }
-        } catch (e) {}
-
-        try {
-            if (value.result !== undefined && value.result !== null) {
-                const text = envValueToText(value.result, key)
-                if (text) return text
-            }
-        } catch (e) {}
-
-        try {
-            if (key && value[key] !== undefined && value[key] !== null) {
-                const text = envValueToText(value[key], key)
-                if (text) return text
-            }
-        } catch (e) {}
-
-        try {
-            if (value.env && key && value.env[key] !== undefined && value.env[key] !== null) {
-                const text = envValueToText(value.env[key], key)
-                if (text) return text
-            }
-        } catch (e) {}
-    }
-
-    return ''
-}
-
-function safeGetEnv(key) {
-    key = normalizeText(key)
-    if (!key) return ''
-
-    let fn = null
-
-    try {
-        if (typeof getEnv === 'function') fn = getEnv
-    } catch (e) {}
-
-    if (!fn) {
-        try {
-            if (typeof globalThis !== 'undefined' && typeof globalThis.getEnv === 'function') {
-                fn = globalThis.getEnv
-            }
-        } catch (e) {}
-    }
-
-    if (!fn) return ''
-
-    const tags = []
-
-    try {
-        if (appConfig && appConfig.uzTag) tags.push(appConfig.uzTag)
-    } catch (e) {}
-
-    try {
-        if (appConfig && appConfig._uzTag) tags.push(appConfig._uzTag)
-    } catch (e) {}
-
-    tags.push('')
-    tags.push(null)
-function envValueToText(value, key) {
-    if (value === undefined || value === null) return ''
-
-    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
-        return normalizeText(value)
-    }
-
-    if (typeof value === 'object') {
-        try {
-            if (value.value !== undefined && value.value !== null) {
-                return envValueToText(value.value, key)
-            }
-        } catch (e) {}
-
-        try {
-            if (value.data !== undefined && value.data !== null) {
-                return envValueToText(value.data, key)
-            }
-        } catch (e) {}
-
-        try {
-            if (key && value[key] !== undefined && value[key] !== null) {
-                return envValueToText(value[key], key)
-            }
-        } catch (e) {}
-    }
-
-    return ''
-}
 
 function safeGetEnv(key) {
     key = normalizeText(key)
@@ -226,6 +112,77 @@ function safeGetEnv(key) {
     return ''
 }
 
+function envValueToText(value, key) {
+    if (value === undefined || value === null) return ''
+
+    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+        return normalizeText(value)
+    }
+
+    if (typeof value === 'object') {
+        try {
+            if (value.value !== undefined && value.value !== null) {
+                const text = envValueToText(value.value, key)
+                if (text) return text
+            }
+        } catch (e) {}
+
+        try {
+            if (value.data !== undefined && value.data !== null) {
+                const text = envValueToText(value.data, key)
+                if (text) return text
+            }
+        } catch (e) {}
+
+        try {
+            if (value.val !== undefined && value.val !== null) {
+                const text = envValueToText(value.val, key)
+                if (text) return text
+            }
+        } catch (e) {}
+
+        try {
+            if (value.result !== undefined && value.result !== null) {
+                const text = envValueToText(value.result, key)
+                if (text) return text
+            }
+        } catch (e) {}
+
+        try {
+            if (key && value[key] !== undefined && value[key] !== null) {
+                const text = envValueToText(value[key], key)
+                if (text) return text
+            }
+        } catch (e) {}
+    }
+
+    return ''
+}
+
+function safeGetEnv(key) {
+    key = normalizeText(key)
+    if (!key) return ''
+
+    if (typeof getEnv !== 'function') return ''
+
+    const tag = normalizeText(appConfig.uzTag || appConfig._uzTag || '')
+
+    // uz 模板里原本就是 getEnv(appConfig.uzTag, key)，所以这里必须 tag 在前、key 在后。
+    try {
+        const value = getEnv(tag, key)
+        const text = envValueToText(value, key)
+        if (text) return text
+    } catch (e) {}
+
+    // 少数旧环境可能不需要 tag，作为兜底。
+    try {
+        const value = getEnv(key)
+        const text = envValueToText(value, key)
+        if (text) return text
+    } catch (e) {}
+
+    return ''
+}
 
 
 
@@ -591,7 +548,7 @@ function cleanEnglishRomanTitle(title) {
         .replace(/\$\$[\s\S]*?\$\$/g, '')
         .replace(/【[^】]*】/g, '')
         .replace(/（[^）]*）/g, '')
-        .replace(/$$[^)]*$$/g, '')
+        .replace(/\([^)]*\)/g, '')
         .replace(/[._-]+/g, ' ')
         .replace(/\s+/g, ' ')
         .trim()
@@ -611,7 +568,7 @@ function cleanClickedTitle(title) {
         .replace(/\$\$[\s\S]*?\$\$/g, '')
         .replace(/【[^】]*】/g, '')
         .replace(/（[^）]*）/g, '')
-        .replace(/$$[^)]*$$/g, '')
+        .replace(/\([^)]*\)/g, '')
         .replace(/\s+/g, ' ')
         .trim()
 
