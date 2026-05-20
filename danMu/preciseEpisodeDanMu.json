@@ -6,7 +6,7 @@
     "url": "https://raw.githubusercontent.com/me26530/uzVideo-extensions/refs/heads/main/danMu/js/PreciseEpisodeDanMu.js",
     "env": "精准弹幕API##必填，格式：线路名@https://域名/TOKEN|线路2@https://域名2/TOKEN&&最小弹幕数量##可选，默认1",
     "remark": "适配 huangxd-/danmu_api；仅使用环境变量API；保留match；支持videoUrl直取；强制JSON；精准集数匹配",
-    "version": 101,
+    "version": 102,
     "type": 400,
     "order": "A00",
     "isAV": 0,
