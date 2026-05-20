@@ -277,29 +277,147 @@ function parseSeasonEpisode(text) {
     return result
 }
 
-function parseEpisodeFromUrl(url) {
-    url = safeDecodeURIComponent(normalizeText(url))
-    if (!url) return null
+function isDigitCharForUrlParse(ch) {
+    if (!ch || ch.length === 0) return false
+    const code = ch.charCodeAt(0)
+    return code >= 48 && code <= 57
+}
 
-    const patterns = [
-        /?:episode|episodes|ep|e|index|nid|vidIndex|play=(\d{1,4})(?:\D|$)/i,
-        /\/(?:episode|episodes|ep|e|index|nid|vidIndex|play)[\/_-]?(\d{1,4})(?:[\/?#]|$)/i,
-        /(?:^|[\/_\-])(?:ep|e)[_\-]?(\d{1,4})(?:\D|$)/i,
-        /[?&]page=(\d{1,4})(?:\D|$)/i,
-        /\/(\d{1,4})\.html(?:[?#].*)?$/i,
-        /第\s*(\d{1,4})\s*[集话話回]/,
-    ]
+function isLetterCharForUrlParse(ch) {
+    if (!ch || ch.length === 0) return false
+    const code = ch.charCodeAt(0)
+    return (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
+}
 
-    for (let i = 0; i < patterns.length; i++) {
-        const m = url.match(patterns[i])
-        if (!m) continue
+function isAlphaNumForUrlParse(ch) {
+    return isDigitCharForUrlParse(ch) || isLetterCharForUrlParse(ch)
+}
 
-        const n = toNumberSafe(m[1])
-        if (n) return n
+function numberFromDigitPrefixForUrlParse(text) {
+    text = normalizeText(text)
+    if (!text) return null
+
+    let s = ''
+    for (let i = 0; i < text.length; i++) {
+        const ch = text.charAt(i)
+        if (isDigitCharForUrlParse(ch)) s += ch
+        else break
+    }
+
+    return toNumberSafe(s)
+}
+
+function tokenizeUrlForEpisodeParse(text) {
+    text = normalizeText(text).toLowerCase()
+
+    const list = []
+    let current = ''
+
+    for (let i = 0; i < text.length; i++) {
+        const ch = text.charAt(i)
+
+        if (isAlphaNumForUrlParse(ch)) {
+            current += ch
+        } else {
+            if (current) {
+                list.push(current)
+                current = ''
+            }
+        }
+    }
+
+    if (current) list.push(current)
+
+    return list
+}
+
+function parseChineseEpisodeFromUrlText(text) {
+    text = normalizeText(text)
+    if (!text) return null
+
+    for (let i = 0; i < text.length; i++) {
+        if (text.charAt(i) !== '第') continue
+
+        let part = ''
+        for (let j = i + 1; j < text.length; j++) {
+            const ch = text.charAt(j)
+
+            if (ch === '集' || ch === '话' || ch === '話' || ch === '回') {
+                const n = /^\d+$/.test(part) ? Number(part) : chineseNumberToInt(part)
+                if (n && n > 0 && n < 3000) return n
+                break
+            }
+
+            if (
+                isDigitCharForUrlParse(ch) ||
+                '零〇一二两三四五六七八九十百'.indexOf(ch) >= 0
+            ) {
+                part += ch
+            } else if (part) {
+                break
+            }
+        }
     }
 
     return null
 }
+
+function parseEpisodeFromUrl(url) {
+    url = safeDecodeURIComponent(normalizeText(url))
+    if (!url) return null
+
+    const cnEp = parseChineseEpisodeFromUrlText(url)
+    if (cnEp) return cnEp
+
+    const tokens = tokenizeUrlForEpisodeParse(url)
+
+    const keys = [
+        'episodes',
+        'episode',
+        'vidindex',
+        'index',
+        'play',
+        'page',
+        'nid',
+        'ep',
+        'e',
+    ]
+
+    for (let i = 0; i < tokens.length; i++) {
+        const token = tokens[i]
+
+        for (let k = 0; k < keys.length; k++) {
+            const key = keys[k]
+
+            if (token === key && i + 1 < tokens.length) {
+                const n1 = numberFromDigitPrefixForUrlParse(tokens[i + 1])
+                if (n1) return n1
+            }
+
+            if (token.indexOf(key) === 0 && token.length > key.length) {
+                const rest = token.substring(key.length)
+                const n2 = numberFromDigitPrefixForUrlParse(rest)
+                if (n2) return n2
+            }
+        }
+    }
+
+    for (let i = tokens.length - 1; i >= 0; i--) {
+        const token = tokens[i]
+        if (token === 'html' || token === 'htm') continue
+
+        const n = numberFromDigitPrefixForUrlParse(token)
+        if (n) {
+            if (n === 720 || n === 1080 || n === 2160 || n === 2024 || n === 2025 || n === 2026) {
+                continue
+            }
+            return n
+        }
+    }
+
+    return null
+}
+
 
 
 function cleanEnglishRomanTitle(title) {
