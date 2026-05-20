@@ -701,9 +701,10 @@ function buildApiUrl(api, path) {
     let base = normalizeApiBase(api.base)
     if (!base) return ''
 
-    const token = normalizeText(safeGetEnv('TOKEN') || safeGetEnv('DANMU_TOKEN') || safeGetEnv('DANMU_API_TOKEN'))
-
+    // 只有 base 里真的包含 {TOKEN} 时，才读取 TOKEN
+    // 如果你的 JSON env 没声明 TOKEN，请不要在 精准弹幕API 里使用 {TOKEN}
     if (base.indexOf('{TOKEN}') >= 0) {
+        const token = normalizeText(safeGetEnv('TOKEN'))
         base = base.replace(/\{TOKEN\}/g, token || '')
         base = base.replace(/\/+$/, '')
     }
@@ -715,16 +716,12 @@ function buildApiUrl(api, path) {
     return base + path
 }
 
+
 function parseCustomApis() {
     const result = []
 
-    let env =
-        safeGetEnv('精准弹幕API') ||
-        safeGetEnv('精准弹幕api') ||
-        safeGetEnv('弹幕API') ||
-        safeGetEnv('弹幕api') ||
-        safeGetEnv('DANMU_API') ||
-        safeGetEnv('danmu_api')
+    // 只读取配置文件里声明过的环境变量，避免触发“未声明环境变量”错误
+    let env = safeGetEnv('精准弹幕API')
 
     env = normalizeText(env)
 
@@ -732,9 +729,6 @@ function parseCustomApis() {
 
     env = env
         .replace(/^精准弹幕API\s*[:=：]\s*/i, '')
-        .replace(/^精准弹幕api\s*[:=：]\s*/i, '')
-        .replace(/^弹幕API\s*[:=：]\s*/i, '')
-        .replace(/^弹幕api\s*[:=：]\s*/i, '')
         .trim()
 
     const parts = env
