@@ -2,7 +2,7 @@
 // @version:7
 // @type:400
 // @remark:适配 huangxd-/danmu_api；仅使用环境变量API；修复JSC正则nothing to repeat；保留match；支持videoUrl直取；强制JSON；精准集数匹配
-// @env:精准弹幕API##必填，格式：线路名@https://api.example.com/TOKEN|线路2@https://api2.example.com/{TOKEN}&&TOKEN##可选，当精准弹幕API中包含{TOKEN}时替换&&最小弹幕数量##可选，默认1
+// @env:精准弹幕API##必填，格式：线路名@https://api.example.com/TOKEN|线路2@https://api2.example.com/TOKEN&&最小弹幕数量##可选，默认1
 // @order:A00
 // @isAV:0
 // @deprecated:0
