@@ -1,27 +1,11 @@
 // @name:精准集数弹幕
-// @version:6
+// @version:7
 // @type:400
-// @remark:适配 huangxd-/danmu_api；取消内置API，仅使用环境变量；支持videoUrl直取；强制JSON；增强match/search/comment兼容；精准集数匹配；避免误配花絮/预告/剧场版
+// @remark:适配 huangxd-/danmu_api；仅使用环境变量API；修复JSC正则nothing to repeat；保留match；支持videoUrl直取；强制JSON；精准集数匹配
 // @env:精准弹幕API##必填，格式：线路名@https://api.example.com/TOKEN|线路2@https://api2.example.com/{TOKEN}&&TOKEN##可选，当精准弹幕API中包含{TOKEN}时替换&&最小弹幕数量##可选，默认1
 // @order:A00
 // @isAV:0
 // @deprecated:0
-
-/*
- * danMu type:400 扩展
- * 专门适配 huangxd-/danmu_api
- *
- * 支持接口：
- * - GET  /api/v2/comment?url={videoUrl}&format=json
- * - POST /api/v2/match
- * - GET  /api/v2/search/episodes
- * - GET  /api/v2/comment/{commentId}?format=json
- *
- * 注意：
- * - 不使用 import/export
- * - 仅调用 uz 运行时内置 req、formatBackData、getEnv、kLocale
- * - API 不再内置，必须通过环境变量 精准弹幕API 配置
- */
 
 const appConfig = {
     _uzTag: '',
@@ -117,7 +101,6 @@ function getMinDanmuCount() {
 
 function parseJsonIfString(result) {
     if (typeof result !== 'string') return result
-
     try {
         return JSON.parse(result)
     } catch (e) {
@@ -131,24 +114,21 @@ function getResponseBody(result) {
 
     if (result.data !== undefined && result.data !== null) {
         const data = parseJsonIfString(result.data)
-
         if (
             data &&
             typeof data === 'object' &&
-            (
-                data.animes ||
+            (data.animes ||
                 data.comments ||
                 data.matches ||
                 data.episodeId ||
                 data.commentId ||
                 data.anime ||
-                data.episode
-            )
+                data.episode ||
+                data.match ||
+                data.matched)
         ) {
             return data
         }
-
-        return result
     }
 
     return result
@@ -161,7 +141,6 @@ function getAnimesFromSearchResult(result) {
     if (body.data && body.data.animes) return body.data.animes
     if (body.animes) return body.animes
     if (body.results && body.results.animes) return body.results.animes
-
     if (Array.isArray(body)) return body
 
     return []
@@ -176,7 +155,6 @@ function getCommentsFromResult(result) {
     if (body.comment) return body.comment
     if (body.danmakus) return body.danmakus
     if (body.danmus) return body.danmus
-
     if (Array.isArray(body)) return body
 
     return []
@@ -304,10 +282,10 @@ function parseEpisodeFromUrl(url) {
     if (!url) return null
 
     const patterns = [
-        /(?:?:episode|episodes|ep|e|index|nid|vidIndex|play=)(\d{1,4})(?:\D|$)/i,
-        /\/(?:episode|episodes|ep|e)\/(\d{1,4})(?:[\/?#]|$)/i,
+        /?:episode|episodes|ep|e|index|nid|vidIndex|play=(\d{1,4})(?:\D|$)/i,
+        /\/(?:episode|episodes|ep|e|index|nid|vidIndex|play)[\/_-]?(\d{1,4})(?:[\/?#]|$)/i,
         /(?:^|[\/_\-])(?:ep|e)[_\-]?(\d{1,4})(?:\D|$)/i,
-        /page=(\d{1,4})(?:\D|$)/i,
+        /[?&]page=(\d{1,4})(?:\D|$)/i,
         /\/(\d{1,4})\.html(?:[?#].*)?$/i,
         /第\s*(\d{1,4})\s*[集话話回]/,
     ]
@@ -404,7 +382,6 @@ function buildTitleCandidates(epInfo) {
 
 function pickEpisodeInfo(item) {
     const p = item || {}
-
     const clickedTitle = normalizeText(getField(p, ['name', 'title', 'videoName', 'vodName']))
 
     const titleText = [
@@ -506,19 +483,14 @@ function pickEpisodeInfo(item) {
 }
 
 function normalizeApiBase(base) {
-    base = normalizeText(base).replace(/\/+$/, '')
-    return base
+    return normalizeText(base).replace(/\/+$/, '')
 }
 
 function buildApiUrl(api, path) {
     let base = normalizeApiBase(api.base)
     if (!base) return ''
 
-    const token = normalizeText(
-        safeGetEnv('TOKEN') ||
-            safeGetEnv('DANMU_TOKEN') ||
-            safeGetEnv('DANMU_API_TOKEN')
-    )
+    const token = normalizeText(safeGetEnv('TOKEN') || safeGetEnv('DANMU_TOKEN') || safeGetEnv('DANMU_API_TOKEN'))
 
     if (base.indexOf('{TOKEN}') >= 0) {
         base = base.replace(/\{TOKEN\}/g, token || '')
@@ -585,18 +557,10 @@ function parseDandanPlayComments(comments) {
 
     for (let index = 0; index < comments.length; index++) {
         const element = comments[index] || {}
-
         const p = normalizeText(element.p || element.param || '')
         const params = p ? p.split(',') : []
 
-        const content =
-            element.m ||
-            element.text ||
-            element.content ||
-            element.contentText ||
-            element.message ||
-            ''
-
+        const content = element.m || element.text || element.content || element.contentText || element.message || ''
         if (!content) continue
 
         const danMu = new DanMu()
@@ -652,7 +616,6 @@ function getEpisodeIdFromItem(ep) {
 
 function getEpisodeNumberFromApiItem(ep) {
     ep = ep || {}
-
     const title = normalizeText(ep.episodeTitle || ep.title || ep.name)
 
     return (
@@ -666,7 +629,6 @@ function getEpisodeNumberFromApiItem(ep) {
 
 function isLikelySpecialEpisodeTitle(title) {
     title = normalizeText(title)
-
     return /花絮|彩蛋|预告|先导|PV|Trailer|Preview|SP|OVA|OAD|特别篇|总集篇|制作|访谈|采访|宣传|片花|番外|看点|速看|速览|会员专享|会员加长|纪录|解读|影评|盘点/i.test(title)
 }
 
@@ -675,7 +637,6 @@ function scoreAnimeTitle(anchorTitle, animeTitle) {
     const target = cleanClickedTitle(animeTitle || '')
 
     if (!anchor || !target) return 0
-
     if (anchor === target) return 100
     if (target.indexOf(anchor) >= 0) return 80
     if (anchor.indexOf(target) >= 0) return 70
@@ -710,16 +671,11 @@ function pickBestEpisodeFromAnimes(animes, epInfo, anchorTitle) {
             let score = titleScore
 
             if (targetEpisode) {
-                if (epNum === targetEpisode) {
-                    score += 120
-                } else {
-                    continue
-                }
+                if (epNum === targetEpisode) score += 120
+                else continue
             }
 
-            if (isLikelySpecialEpisodeTitle(episodeTitle)) {
-                score -= 80
-            }
+            if (isLikelySpecialEpisodeTitle(episodeTitle)) score -= 80
 
             score -= i * 2
             score -= j
@@ -767,13 +723,22 @@ function extractMatchEpisodeId(result) {
 
     if (direct) return normalizeText(direct)
 
-    const ep = body.episode || body.matchedEpisode || body.selectedEpisode || (body.data && body.data.episode)
+    const ep =
+        body.episode ||
+        body.matchedEpisode ||
+        body.selectedEpisode ||
+        (body.data && body.data.episode)
+
     if (ep) {
         const id = getEpisodeIdFromItem(ep)
         if (id) return id
     }
 
-    const match = body.match || body.matched || (body.data && (body.data.match || body.data.matched))
+    const match =
+        body.match ||
+        body.matched ||
+        (body.data && (body.data.match || body.data.matched))
+
     if (match) {
         const id = normalizeText(match.episodeId || match.commentId || match.id)
         if (id) return id
@@ -821,10 +786,12 @@ async function matchByApi(api, queryText, epInfo) {
     const episode = epInfo && epInfo.episode ? String(epInfo.episode) : ''
     const season = epInfo && epInfo.season ? String(epInfo.season) : ''
 
-    const body = {
+    const bodyObj = {
+        fileName: queryText,
         title: queryText,
         name: queryText,
         keyword: queryText,
+        anime: queryText,
         episode: episode,
         season: season,
     }
@@ -835,7 +802,7 @@ async function matchByApi(api, queryText, epInfo) {
             headers: {
                 'Content-Type': 'application/json',
             },
-            data: body,
+            body: JSON.stringify(bodyObj),
         })
     } catch (e1) {
         try {
@@ -844,17 +811,30 @@ async function matchByApi(api, queryText, epInfo) {
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify(body),
+                data: JSON.stringify(bodyObj),
             })
         } catch (e2) {
-            return null
+            try {
+                return await req(url, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    data: bodyObj,
+                })
+            } catch (e3) {
+                return null
+            }
         }
     }
 }
 
 async function getCommentsByApi(api, episodeId) {
     const locale = typeof kLocale === 'undefined' ? '' : normalizeText(kLocale)
-    const isSimplified = locale.indexOf('CN') !== -1 || locale.indexOf('Hans') !== -1 || locale.indexOf('zh') !== -1
+    const isSimplified =
+        locale.indexOf('CN') !== -1 ||
+        locale.indexOf('Hans') !== -1 ||
+        locale.indexOf('zh') !== -1
 
     const url = buildApiUrl(
         api,
