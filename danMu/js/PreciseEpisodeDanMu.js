@@ -171,48 +171,61 @@ function safeGetEnv(key) {
 
     tags.push('')
     tags.push(null)
-    tags.push(undefined)
+function envValueToText(value, key) {
+    if (value === undefined || value === null) return ''
 
-    for (let i = 0; i < tags.length; i++) {
-        const tag = tags[i]
+    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+        return normalizeText(value)
+    }
 
+    if (typeof value === 'object') {
         try {
-            const value = fn(tag, key)
-            const text = envValueToText(value, key)
-            if (text) return text
+            if (value.value !== undefined && value.value !== null) {
+                return envValueToText(value.value, key)
+            }
         } catch (e) {}
 
         try {
-            const value = fn(key, tag)
-            const text = envValueToText(value, key)
-            if (text) return text
+            if (value.data !== undefined && value.data !== null) {
+                return envValueToText(value.data, key)
+            }
         } catch (e) {}
 
         try {
-            const map = fn(tag)
-            const text = envValueToText(map, key)
-            if (text) return text
+            if (key && value[key] !== undefined && value[key] !== null) {
+                return envValueToText(value[key], key)
+            }
         } catch (e) {}
     }
 
+    return ''
+}
+
+function safeGetEnv(key) {
+    key = normalizeText(key)
+    if (!key) return ''
+
+    if (typeof getEnv !== 'function') return ''
+
+    const tag = normalizeText(appConfig.uzTag || appConfig._uzTag || '')
+
+    // 重点：只保留这个方向，避免把 uzTag 当环境变量名读取
     try {
-        const value = fn(key)
+        const value = getEnv(key, tag)
         const text = envValueToText(value, key)
         if (text) return text
     } catch (e) {}
 
+    // 兼容部分旧版运行时：只传 key
     try {
-        const value = fn({
-            key: key,
-            uzTag: appConfig.uzTag,
-            tag: appConfig.uzTag,
-        })
+        const value = getEnv(key)
         const text = envValueToText(value, key)
         if (text) return text
     } catch (e) {}
 
     return ''
 }
+
 
 
 
