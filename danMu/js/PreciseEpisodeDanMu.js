@@ -133,6 +133,7 @@ function envValueToText(value, key) {
 }
 
 function safeGetEnv(key) {
+function safeGetEnv(key) {
     key = normalizeText(key)
     if (!key) return ''
 
@@ -140,16 +141,17 @@ function safeGetEnv(key) {
 
     const tag = normalizeText(appConfig.uzTag || appConfig._uzTag || '')
 
-    // 当前 uz 运行环境实际为：getEnv(环境变量名, uzTag)
-    // 不使用 getEnv(key) 兜底，避免触发“未在配置文件中声明环境变量”的红色提示。
+    // 按 uz 模板原始方式读取：getEnv(uzTag, 环境变量名)
+    // 不使用 getEnv(key) 兜底，避免触发未声明环境变量提示。
     try {
-        const value = getEnv(key, tag)
+        const value = getEnv(tag, key)
         const text = envValueToText(value, key)
         if (text) return text
     } catch (e) {}
 
     return ''
 }
+
 
 function getMinDanmuCount() {
     const n = toNumberSafe(safeGetEnv('最小弹幕数量'))
