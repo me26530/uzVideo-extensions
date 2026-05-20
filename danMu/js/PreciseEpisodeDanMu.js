@@ -86,13 +86,42 @@ function getField(obj, keys) {
 }
 
 function safeGetEnv(key) {
+    key = normalizeText(key)
+    if (!key) return ''
+
+    if (typeof getEnv !== 'function') return ''
+
+    const tags = []
+
     try {
-        if (typeof getEnv === 'function') {
-            return normalizeText(getEnv(appConfig.uzTag, key))
-        }
+        if (appConfig && appConfig.uzTag) tags.push(appConfig.uzTag)
     } catch (e) {}
+
+    try {
+        if (appConfig && appConfig._uzTag) tags.push(appConfig._uzTag)
+    } catch (e) {}
+
+    tags.push('')
+    tags.push(null)
+    tags.push(undefined)
+
+    for (let i = 0; i < tags.length; i++) {
+        try {
+            const value = getEnv(tags[i], key)
+            const text = normalizeText(value)
+            if (text) return text
+        } catch (e) {}
+    }
+
+    try {
+        const value = getEnv(key)
+        const text = normalizeText(value)
+        if (text) return text
+    } catch (e) {}
+
     return ''
 }
+
 
 function getMinDanmuCount() {
     const n = toNumberSafe(safeGetEnv('最小弹幕数量'))
