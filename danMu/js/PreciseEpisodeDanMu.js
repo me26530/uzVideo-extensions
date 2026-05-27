@@ -1,9 +1,10 @@
 // ignore
 //@name:danmu_api硬编码ES5
-//@version:10
+//@version:11
 //@remark:danmu_api 自动匹配弹幕，ES5写法，不走FongMi，硬编码API地址
 //@codeID:
 //@env:
+//@instance:danmuApiHardCodeES5
 // ignore
 
 var DM_API_BASE_ES5 = 'https://5m36yzdvtmqcrkubdau5axe5lu0qrizy.lambda-url.ap-northeast-1.on.aws/1105074072'
@@ -22,6 +23,7 @@ function dmEs5Pick(obj, keys, def) {
 
   for (var i = 0; i < keys.length; i++) {
     var k = keys[i]
+
     if (obj[k] !== undefined && obj[k] !== null && dmEs5Trim(obj[k]) !== '') {
       return obj[k]
     }
@@ -157,20 +159,24 @@ function dmEs5HttpGet(url) {
   }
 
   if (typeof req === 'function') {
-    return req(url, opt).then(function (res) {
+    return Promise.resolve(req(url, opt)).then(function (res) {
       return dmEs5NormalizeResponse(res)
     })
   }
 
   if (typeof request === 'function') {
-    return request(url, opt).then(function (res) {
+    return Promise.resolve(request(url, opt)).then(function (res) {
       return dmEs5NormalizeResponse(res)
     })
   }
 
   if (typeof fetch === 'function') {
     return fetch(url, opt).then(function (res) {
-      return res.text()
+      if (res && typeof res.text === 'function') {
+        return res.text()
+      }
+
+      return dmEs5NormalizeResponse(res)
     })
   }
 
@@ -189,20 +195,24 @@ function dmEs5HttpPostJson(url, body) {
   }
 
   if (typeof req === 'function') {
-    return req(url, opt).then(function (res) {
+    return Promise.resolve(req(url, opt)).then(function (res) {
       return dmEs5NormalizeResponse(res)
     })
   }
 
   if (typeof request === 'function') {
-    return request(url, opt).then(function (res) {
+    return Promise.resolve(request(url, opt)).then(function (res) {
       return dmEs5NormalizeResponse(res)
     })
   }
 
   if (typeof fetch === 'function') {
     return fetch(url, opt).then(function (res) {
-      return res.text()
+      if (res && typeof res.text === 'function') {
+        return res.text()
+      }
+
+      return dmEs5NormalizeResponse(res)
     })
   }
 
@@ -314,7 +324,7 @@ function dmEs5ConvertComments(commentJson) {
       color: dmEs5NormalizeColor(color),
       type: dmEs5NormalizeType(type),
 
-      // 兼容弹弹play / danmu_api 原始格式
+      // 兼容 danmu_api / 弹弹Play 原始格式
       p: item.p || (String(time) + ',' + String(type) + ',' + String(color)),
       m: text
     })
