@@ -4,6 +4,6 @@
   "url": "https://raw.githubusercontent.com/me26530/uzVideo-extensions/refs/heads/main/danMu/js/PreciseEpisodeDanMu.js",
   "env": "",
   "remark": "接入 huangxd-/danmu_api，自动匹配弹幕，不走 FongMi",
-  "version": 12,
+  "version": 14,
   "type": 400
 }
