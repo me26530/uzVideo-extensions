@@ -1,9 +1,9 @@
 {
-  "name": "danmu_api自动匹配弹幕",
+  "name": "danmu_api自动匹配",
   "codeID": "",
   "url": "https://raw.githubusercontent.com/me26530/uzVideo-extensions/refs/heads/main/danMu/js/PreciseEpisodeDanMu.js",
-  "env": "DANMU_API_BASE##danmu_api服务地址，例如 https://xxx.vercel.app/你的TOKEN",
-  "remark": "接入 huangxd-/danmu_api，使用 match 自动匹配，不走 FongMi 接口",
-  "version": 2,
+  "env": "DANMU_API_BASE##danmu_api服务地址，例如 https://xxx.on.aws/你的TOKEN&&DANMU_MAX_COUNT##最大弹幕数量，默认8000",
+  "remark": "huangxd-/danmu_api 自动匹配弹幕，不走 FongMi",
+  "version": 6,
   "type": 400
 }
