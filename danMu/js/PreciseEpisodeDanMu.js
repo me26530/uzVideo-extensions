@@ -1,7 +1,7 @@
 // ignore
 //@name:danmu_api自动匹配
 // 版本号纯数字
-//@version:13
+//@version:14
 // 备注，没有的话就不填
 //@remark:接入 huangxd-/danmu_api，自动匹配弹幕，不走 FongMi
 // 加密 id，没有的话就不填
@@ -128,10 +128,9 @@ class DanVideo extends DanEpisode {
  * ==========================
  */
 
-// 这里已经写死你的 danmu_api 地址
 const DANMU_API_BASE = 'https://5m36yzdvtmqcrkubdau5axe5lu0qrizy.lambda-url.ap-northeast-1.on.aws/1105074072'
 
-// 最大弹幕数量，避免一次加载 1w+ 导致播放器卡顿
+// 最大弹幕数量，避免一次加载过多导致播放器卡顿
 const DANMU_MAX_COUNT = 8000
 
 /**
@@ -297,24 +296,63 @@ async function dmHttpGet(url) {
 /**
  * POST JSON 请求
  *
- * 重要：
- * uz 的 req POST 请求体使用 data，不使用 body。
- * 否则 danmu_api 会返回 Invalid JSON body。
+ * 这里兼容多种 uz req 写法：
+ * 1. data: object
+ * 2. data: JSON string
+ * 3. body: JSON string
+ * 4. params: object
+ *
+ * 只要返回不再是 Invalid JSON body，就认为请求体被服务端识别。
  */
 async function dmHttpPostJson(url, body) {
     const payload = JSON.stringify(body || {})
 
-    const res = await req(url, {
-        method: 'POST',
-        headers: {
-            'User-Agent': 'Mozilla/5.0',
-            'Accept': 'application/json,text/plain,*/*',
-            'Content-Type': 'application/json'
-        },
-        data: payload
-    })
+    const headers = {
+        'User-Agent': 'Mozilla/5.0',
+        'Accept': 'application/json,text/plain,*/*',
+        'Content-Type': 'application/json',
+        'content-type': 'application/json'
+    }
 
-    return dmNormalizeResponse(res)
+    const tryList = [
+        {
+            method: 'POST',
+            headers: headers,
+            data: body || {}
+        },
+        {
+            method: 'POST',
+            headers: headers,
+            data: payload
+        },
+        {
+            method: 'POST',
+            headers: headers,
+            body: payload
+        },
+        {
+            method: 'POST',
+            headers: headers,
+            params: body || {}
+        }
+    ]
+
+    let lastText = ''
+
+    for (let i = 0; i < tryList.length; i++) {
+        const res = await req(url, tryList[i])
+        const text = dmNormalizeResponse(res)
+        lastText = text
+
+        const json = dmParseJson(text)
+
+        // 如果不是 Invalid JSON body，就说明这次 POST body 形式至少被服务端接受了
+        if (!json || json.errorMessage !== 'Invalid JSON body') {
+            return text
+        }
+    }
+
+    return lastText
 }
 
 function dmExtractEpisodeId(matchJson) {
@@ -353,7 +391,7 @@ function dmConvertColor(color) {
 
     color = dmTrim(color)
 
-    // danmu_api 返回的颜色本身就是 10 进制，如 16777215
+    // danmu_api 返回颜色通常是 10 进制，如 16777215
     return color
 }
 
