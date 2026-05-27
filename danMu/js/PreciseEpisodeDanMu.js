@@ -437,4 +437,4 @@ class DanmuApiHardCodeV9 {
   }
 }
 
-var danmuApiHardCodeV100 = new DanmuApiHardCodeV100()
+var danmuApiHardCodeV9 = new DanmuApiHardCodeV9()
