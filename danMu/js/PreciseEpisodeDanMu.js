@@ -1,9 +1,9 @@
 // ignore
 //@name:danmu_api自动匹配
 // 版本号纯数字
-//@version:25
+//@version:26
 // 备注，没有的话就不填
-//@remark:接入 huangxd-/danmu_api，支持多API线路，自动匹配和手动精准选集，不走 FongMi
+//@remark:接入 huangxd-/danmu_api，支持多API线路、自动匹配和手动精准选集，不走 FongMi
 // 加密 id，没有的话就不填
 //@codeID:
 // 使用的环境变量，没有的话就不填
@@ -100,12 +100,6 @@ class DanVideo extends DanEpisode {
 
 const DANMU_MAX_COUNT_DEFAULT = 8000
 
-/**
- * ==========================
- * 通用工具
- * ==========================
- */
-
 function dmTrim(v) {
     return String(v || '').replace(/^\s+|\s+$/g, '')
 }
@@ -125,6 +119,7 @@ function dmPick(obj, keys, def) {
 
     for (let i = 0; i < keys.length; i++) {
         const k = keys[i]
+
         if (obj[k] !== undefined && obj[k] !== null && dmTrim(obj[k]) !== '') {
             return obj[k]
         }
@@ -140,11 +135,8 @@ function dmShowToast(message) {
 }
 
 /**
- * ==========================
  * 环境变量
- * ==========================
  */
-
 async function dmGetEnv(key, def) {
     try {
         let v = await getEnv(appConfig.uzTag, key)
@@ -173,7 +165,6 @@ async function dmGetEnv(key, def) {
 
 function dmNormalizeApiBase(base) {
     base = dmTrim(base)
-
     base = base.replace(/^['"]+|['"]+$/g, '')
 
     while (base.length > 0 && base.charAt(base.length - 1) === '/') {
@@ -192,18 +183,15 @@ function dmNormalizeApiBase(base) {
 }
 
 /**
- * 解析多 API 环境变量
+ * 解析多 API
  *
- * 推荐格式：
+ * DANMU_API_LIST:
  * aws@https://xxx/密钥|韩@https://xxx/密钥
- *
- * 兼容：
- * https://xxx/密钥
  */
 async function dmGetApiList() {
     let raw = await dmGetEnv('DANMU_API_LIST', '')
 
-    // 兼容旧变量
+    // 兼容旧环境变量
     if (!raw) {
         raw = await dmGetEnv('DANMU_API_BASE', '')
     }
@@ -218,7 +206,6 @@ async function dmGetApiList() {
 
     for (let i = 0; i < parts.length; i++) {
         const item = dmTrim(parts[i])
-
         if (!item) continue
 
         let name = ''
@@ -248,21 +235,20 @@ async function dmGetApiList() {
 }
 
 /**
- * 根据 UZ 传入的 line 选择 API。
- * 如果没传 line，默认第一个。
+ * 根据 line 或 videoPlatformName 选择 API
  */
-async function dmSelectApi(line) {
+async function dmSelectApi(lineOrPlatform) {
     const list = await dmGetApiList()
 
     if (!list || list.length === 0) {
         return null
     }
 
-    line = dmTrim(line)
+    const target = dmTrim(lineOrPlatform)
 
-    if (line) {
+    if (target) {
         for (let i = 0; i < list.length; i++) {
-            if (list[i].name === line) {
+            if (list[i].name === target) {
                 return list[i]
             }
         }
@@ -281,11 +267,8 @@ async function dmGetMaxCount() {
 }
 
 /**
- * ==========================
  * 剧名 / 集数识别
- * ==========================
  */
-
 function dmGetName(item) {
     let name = dmPick(item, [
         'name',
@@ -527,11 +510,8 @@ function dmGetSeason(item) {
 }
 
 /**
- * ==========================
  * 网络
- * ==========================
  */
-
 function dmParseJson(text) {
     if (!text) return null
     if (typeof text === 'object') return text
@@ -594,11 +574,8 @@ async function dmHttpPostJson(url, body) {
 }
 
 /**
- * ==========================
  * danmu_api 返回处理
- * ==========================
  */
-
 function dmPickAnimeList(json) {
     if (!json) return []
 
@@ -656,47 +633,39 @@ function dmExtractEpisodeId(matchJson) {
     return ''
 }
 
-function dmBuildMatchToast(matchJson, episodeInfo, apiItem) {
-    if (!matchJson) return ''
-
+/**
+ * 解析匹配到的集数，只用于提示
+ */
+function dmExtractMatchedEpisode(matchJson) {
     if (
-        matchJson.matches &&
-        dmIsArray(matchJson.matches) &&
-        matchJson.matches.length > 0
+        !matchJson ||
+        !matchJson.matches ||
+        !dmIsArray(matchJson.matches) ||
+        matchJson.matches.length === 0
     ) {
-        const item = matchJson.matches[0]
-
-        if (!item) return ''
-
-        const animeTitle = item.animeTitle || ''
-        const episodeTitle = item.episodeTitle || ''
-        const episodeId = item.episodeId || item.commentId || item.id || ''
-
-        let tip = 'API：' + (apiItem ? apiItem.name : '') +
-            '\n识别集数：第' + episodeInfo.episode + '集'
-
-        if (episodeInfo.source === 'uzEpisode') {
-            tip += '\n来源：UZ传入集数，可能不准'
-        } else {
-            tip += '\n来源：' + episodeInfo.source
-        }
-
-        if (episodeInfo.raw) {
-            tip += '\n原始值：' + String(episodeInfo.raw).substring(0, 30)
-        }
-
-        if (animeTitle || episodeTitle) {
-            tip += '\n匹配：'
-        }
-
-        if (animeTitle) tip += animeTitle
-        if (episodeTitle) tip += ' - ' + episodeTitle
-        if (episodeId) tip += '\nID：' + episodeId
-
-        return tip
+        return 0
     }
 
-    return ''
+    const item = matchJson.matches[0]
+    const epTitle = item.episodeTitle || ''
+
+    const n = dmExtractEpisodeFromText(epTitle, '')
+
+    return n > 0 ? n : 0
+}
+
+/**
+ * 提示只保留线路名 + 匹配到第几集
+ */
+function dmBuildSimpleMatchToast(matchJson, apiItem) {
+    const apiName = apiItem ? apiItem.name : ''
+    const matchedEp = dmExtractMatchedEpisode(matchJson)
+
+    if (matchedEp > 0) {
+        return apiName + '：匹配第' + matchedEp + '集'
+    }
+
+    return apiName + '：匹配成功'
 }
 
 function dmConvertColor(color) {
@@ -787,11 +756,8 @@ async function dmGetCommentsByEpisodeId(apiBase, episodeId) {
 }
 
 /**
- * ==========================
  * UZ type:400
- * ==========================
  */
-
 async function getLines() {
     const apiList = await dmGetApiList()
 
@@ -807,17 +773,31 @@ async function getLines() {
     })
 }
 
+/**
+ * 手动搜索平台列表：
+ * 这里也显示线路名，方便在左侧选择 aws / 韩
+ */
 async function getVideoPlatformList() {
-    const p = new DanVideoPlatform()
-    p.name = 'danmu_api'
-    p.isLineSwitchSupported = true
+    const apiList = await dmGetApiList()
+
+    const platforms = []
+
+    for (let i = 0; i < apiList.length; i++) {
+        const p = new DanVideoPlatform()
+        p.name = apiList[i].name
+        p.isLineSwitchSupported = true
+        platforms.push(p)
+    }
 
     return formatBackData({
-        data: [p],
-        error: '',
+        data: platforms,
+        error: platforms.length > 0 ? '' : '请配置 DANMU_API_LIST',
     })
 }
 
+/**
+ * 手动搜索：根据选择的线路搜索
+ */
 async function getVideoList(args) {
     const back = {
         data: [],
@@ -825,7 +805,13 @@ async function getVideoList(args) {
     }
 
     try {
-        const apiItem = await dmSelectApi(args ? args.line : '')
+        const selectName =
+            (args && args.videoPlatformName) ||
+            (args && args.line) ||
+            ''
+
+        const apiItem = await dmSelectApi(selectName)
+
         if (!apiItem) {
             back.error = '请配置 DANMU_API_LIST'
             return formatBackData(back)
@@ -905,6 +891,9 @@ async function getVideoList(args) {
     return formatBackData(back)
 }
 
+/**
+ * 手动选剧后获取剧集
+ */
 async function getVideoEpisodes(args) {
     const back = {
         data: [],
@@ -924,7 +913,13 @@ async function getVideoEpisodes(args) {
             apiBase = args.danVideo.extData.apiBase
             apiName = args.danVideo.extData.apiName || ''
         } else {
-            const apiItem = await dmSelectApi(args ? args.line : '')
+            const selectName =
+                (args && args.videoPlatformName) ||
+                (args && args.line) ||
+                ''
+
+            const apiItem = await dmSelectApi(selectName)
+
             if (apiItem) {
                 apiBase = apiItem.url
                 apiName = apiItem.name
@@ -983,7 +978,7 @@ async function getVideoEpisodes(args) {
 
             const d = new DanEpisode()
             d.vod_name = title
-            d.vod_remarks = apiName ? ('API：' + apiName) : title
+            d.vod_remarks = apiName
             d.extData = {
                 episodeId: episodeId,
                 apiName: apiName,
@@ -1023,14 +1018,7 @@ async function searchDanMu(item) {
                 return formatBackData(backData)
             }
 
-            dmShowToast(
-                '手动选集\nAPI：' +
-                apiName +
-                '\n' +
-                (item.danEpisode.vod_name || '') +
-                '\nID：' +
-                episodeId
-            )
+            dmShowToast(apiName + '：手动选集')
 
             const ret = await dmGetCommentsByEpisodeId(apiBase, episodeId)
 
@@ -1047,7 +1035,12 @@ async function searchDanMu(item) {
         /**
          * 自动匹配
          */
-        const apiItem = await dmSelectApi(item.line || '')
+        const selectName =
+            item.line ||
+            item.videoPlatformName ||
+            ''
+
+        const apiItem = await dmSelectApi(selectName)
 
         if (!apiItem) {
             backData.error = '请配置 DANMU_API_LIST'
@@ -1073,25 +1066,6 @@ async function searchDanMu(item) {
 
         if (isNaN(season) || season <= 0) {
             season = 1
-        }
-
-        if (episodeInfo.source === 'uzEpisode') {
-            dmShowToast(
-                'API：' +
-                apiItem.name +
-                '\n未拿到真实文件名\n使用 UZ 集数：第' +
-                episode +
-                '集\n如不准，请使用手动搜索选集'
-            )
-        } else {
-            dmShowToast(
-                'API：' +
-                apiItem.name +
-                '\n自动识别集数：第' +
-                episode +
-                '集\n来源：' +
-                episodeInfo.source
-            )
         }
 
         const keyword = name + ' S' + dmPad2(season) + 'E' + dmPad2(episode)
@@ -1129,8 +1103,8 @@ async function searchDanMu(item) {
             return formatBackData(backData)
         }
 
-        const matchToast = dmBuildMatchToast(matchJson, episodeInfo, apiItem)
-        dmShowToast(matchToast)
+        // 提示只保留线路名 + 匹配到第几集
+        dmShowToast(dmBuildSimpleMatchToast(matchJson, apiItem))
 
         const ret = await dmGetCommentsByEpisodeId(apiItem.url, episodeId)
 
