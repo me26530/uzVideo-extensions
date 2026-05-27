@@ -1,7 +1,7 @@
 // ignore
 //@name:danmu_api自动匹配
 // 版本号纯数字
-//@version:27
+//@version:29
 // 备注，没有的话就不填
 //@remark:接入 danmu_api，支持多API线路、自动匹配和手动精准选集，不走 FongMi，无弹幕数量限制
 // 加密 id，没有的话就不填
