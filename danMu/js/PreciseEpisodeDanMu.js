@@ -1,9 +1,9 @@
 // ignore
 //@name:danmu_api自动匹配
 // 版本号纯数字
-//@version:17
+//@version:18
 // 备注，没有的话就不填
-//@remark:接入 huangxd-/danmu_api，自动匹配弹幕，不走 FongMi，环境变量版
+//@remark:接入 huangxd-/danmu_api，自动匹配弹幕，不走 FongMi，环境变量版，带匹配提示
 // 加密 id，没有的话就不填
 //@codeID:
 // 使用的环境变量，没有的话就不填
@@ -89,39 +89,12 @@ class BackData {
 
 class SearchParameters {
     constructor() {
-        /**
-         * 动画或影片名称
-         */
         this.name = ''
-
-        /**
-         * 动画或影片集数
-         */
         this.episode = ''
-
-        /**
-         * 所在平台剧集链接
-         */
         this.videoUrl = ''
-
-        /**
-         * 弹幕线路
-         */
         this.line = ''
-
-        /**
-         * 搜索视频平台名称
-         */
         this.videoPlatformName = ''
-
-        /**
-         * 弹幕视频信息
-         */
         this.danVideo = null
-
-        /**
-         * 手动选择匹配的视频信息
-         */
         this.danEpisode = null
     }
 }
@@ -154,6 +127,12 @@ class DanVideo extends DanEpisode {
  */
 const DANMU_MAX_COUNT_DEFAULT = 8000
 
+/**
+ * ==========================
+ * 通用工具
+ * ==========================
+ */
+
 function dmTrim(v) {
     return String(v || '').replace(/^\s+|\s+$/g, '')
 }
@@ -185,13 +164,12 @@ function dmPick(obj, keys, def) {
 /**
  * 读取环境变量
  *
- * 兼容：
- * 1. getEnv(appConfig.uzTag, key)
- * 2. getEnv(key)
+ * 这里只使用 getEnv(key)，避免触发：
+ * “未在配置文件中声明环境变量，读取失败”
  */
 async function dmGetEnv(key, def) {
     try {
-        let v = await getEnv(appConfig.uzTag, key)
+        let v = await getEnv(key)
 
         if (v !== undefined && v !== null) {
             if (typeof v === 'object') {
@@ -214,40 +192,16 @@ async function dmGetEnv(key, def) {
         }
     } catch (e) {}
 
-    try {
-        let v2 = await getEnv(key)
-
-        if (v2 !== undefined && v2 !== null) {
-            if (typeof v2 === 'object') {
-                if (v2.data !== undefined) {
-                    v2 = v2.data
-                } else if (v2.value !== undefined) {
-                    v2 = v2.value
-                } else if (v2.content !== undefined) {
-                    v2 = v2.content
-                } else {
-                    v2 = ''
-                }
-            }
-
-            v2 = dmTrim(v2)
-
-            if (v2 !== '') {
-                return v2
-            }
-        }
-    } catch (e2) {}
-
     return def
 }
 
 /**
  * 获取 danmu_api 基础地址
  *
- * 正确格式：
+ * 正确填写：
  * https://你的域名/你的TOKEN
  *
- * 不要填：
+ * 不要填写：
  * /api/v2/match
  * /api/v2/comment
  * /api/logs
@@ -287,6 +241,12 @@ async function dmGetMaxCount() {
 
     return n
 }
+
+/**
+ * ==========================
+ * 参数解析
+ * ==========================
+ */
 
 function dmGetName(item) {
     let name = dmPick(item, [
@@ -363,6 +323,12 @@ function dmGetSeason(item) {
     return '1'
 }
 
+/**
+ * ==========================
+ * 网络与 JSON
+ * ==========================
+ */
+
 function dmParseJson(text) {
     if (!text) return null
     if (typeof text === 'object') return text
@@ -417,7 +383,8 @@ async function dmHttpGet(url) {
 /**
  * POST JSON 请求
  *
- * 已确认 UZ req 对 danmu_api match 接口使用 data: 对象可以正常请求。
+ * 已验证：
+ * UZ req 对 danmu_api /api/v2/match 使用 data: 对象可正常请求。
  */
 async function dmHttpPostJson(url, body) {
     const res = await req(url, {
@@ -433,6 +400,12 @@ async function dmHttpPostJson(url, body) {
 
     return dmNormalizeResponse(res)
 }
+
+/**
+ * ==========================
+ * danmu_api 返回处理
+ * ==========================
+ */
 
 function dmExtractEpisodeId(matchJson) {
     if (!matchJson) return ''
@@ -458,6 +431,44 @@ function dmExtractEpisodeId(matchJson) {
                 return dmTrim(id)
             }
         }
+    }
+
+    return ''
+}
+
+/**
+ * 构造匹配提示弹幕
+ */
+function dmBuildMatchTip(matchJson) {
+    if (!matchJson) return ''
+
+    if (
+        matchJson.matches &&
+        dmIsArray(matchJson.matches) &&
+        matchJson.matches.length > 0
+    ) {
+        const item = matchJson.matches[0]
+        if (!item) return ''
+
+        const animeTitle = item.animeTitle || ''
+        const episodeTitle = item.episodeTitle || ''
+        const type = item.type || ''
+
+        let tip = '已匹配：'
+
+        if (animeTitle) {
+            tip += animeTitle
+        }
+
+        if (episodeTitle) {
+            tip += ' - ' + episodeTitle
+        }
+
+        if (type) {
+            tip += ' [' + type + ']'
+        }
+
+        return tip
     }
 
     return ''
@@ -540,6 +551,12 @@ async function dmConvertComments(commentJson) {
 
     return result
 }
+
+/**
+ * ==========================
+ * UZ type:400 全局函数
+ * ==========================
+ */
 
 /**
  * 获取所有弹幕线路
@@ -642,6 +659,7 @@ async function searchDanMu(item) {
         }
 
         const episodeId = dmExtractEpisodeId(matchJson)
+        const matchTip = dmBuildMatchTip(matchJson)
 
         if (!episodeId) {
             backData.error = '自动匹配成功但未找到 episodeId'
@@ -663,6 +681,16 @@ async function searchDanMu(item) {
         }
 
         const all = await dmConvertComments(commentJson)
+
+        // 在弹幕最前面加入匹配提示
+        if (matchTip) {
+            const tipDan = new DanMu()
+            tipDan.content = matchTip
+            tipDan.time = 0
+            tipDan.color = '16776960' // 黄色
+
+            all.unshift(tipDan)
+        }
 
         backData.data = all
     } catch (error) {
