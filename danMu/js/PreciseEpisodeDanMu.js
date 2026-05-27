@@ -1,13 +1,13 @@
 // ignore
-//@name:自动弹幕
+//@name:danmu_api自动匹配
 // 版本号纯数字
-//@version:28
+//@version:27
 // 备注，没有的话就不填
-//@remark:接入 huangxd-/danmu_api，支持多API线路、自动匹配和手动精准选集，不走 FongMi
+//@remark:接入 danmu_api，支持多API线路、自动匹配和手动精准选集，不走 FongMi，无弹幕数量限制
 // 加密 id，没有的话就不填
 //@codeID:
 // 使用的环境变量，没有的话就不填
-//@env:自动弹幕API##多API列表，格式 aws@https://xxx/密钥|韩@https://xxx/密钥&&DANMU_MAX_COUNT##最大弹幕数量，默认8000
+//@env:自动弹幕API##多API列表，格式 aws@https://xxx/密钥|韩@https://xxx/密钥
 // 是否是AV 1是  0否
 //@isAV:0
 //是否弃用 1是  0否
@@ -98,7 +98,11 @@ class DanVideo extends DanEpisode {
     }
 }
 
-const DANMU_MAX_COUNT_DEFAULT = 8000
+/**
+ * ==========================
+ * 通用工具
+ * ==========================
+ */
 
 function dmTrim(v) {
     return String(v || '').replace(/^\s+|\s+$/g, '')
@@ -135,8 +139,11 @@ function dmShowToast(message) {
 }
 
 /**
+ * ==========================
  * 环境变量
+ * ==========================
  */
+
 async function dmGetEnv(key, def) {
     try {
         let v = await getEnv(appConfig.uzTag, key)
@@ -182,16 +189,30 @@ function dmNormalizeApiBase(base) {
     return base
 }
 
+/**
+ * 解析多 API
+ *
+ * 推荐环境变量：
+ * 自动弹幕API
+ *
+ * 格式：
+ * aws@https://xxx/密钥|韩@https://xxx/密钥
+ */
 async function dmGetApiList() {
-    // 新变量名：自动弹幕API
+    // 新变量名
     let raw = await dmGetEnv('自动弹幕API', '')
 
-    // 兼容旧变量名 DANMU_API_LIST
+    // 兼容旧变量名
+    if (!raw) {
+        raw = await dmGetEnv('自动匹配API', '')
+    }
+
+    // 兼容英文变量名
     if (!raw) {
         raw = await dmGetEnv('DANMU_API_LIST', '')
     }
 
-    // 兼容更旧的单 API 变量 DANMU_API_BASE
+    // 兼容单 API 旧变量
     if (!raw) {
         raw = await dmGetEnv('DANMU_API_BASE', '')
     }
@@ -234,7 +255,6 @@ async function dmGetApiList() {
     return list
 }
 
-
 /**
  * 根据 line 或 videoPlatformName 选择 API
  */
@@ -258,18 +278,12 @@ async function dmSelectApi(lineOrPlatform) {
     return list[0]
 }
 
-async function dmGetMaxCount() {
-    const value = await dmGetEnv('DANMU_MAX_COUNT', String(DANMU_MAX_COUNT_DEFAULT))
-    const n = parseInt(value, 10)
-
-    if (isNaN(n) || n <= 0) return DANMU_MAX_COUNT_DEFAULT
-
-    return n
-}
-
 /**
+ * ==========================
  * 剧名 / 集数识别
+ * ==========================
  */
+
 function dmGetName(item) {
     let name = dmPick(item, [
         'name',
@@ -511,8 +525,11 @@ function dmGetSeason(item) {
 }
 
 /**
+ * ==========================
  * 网络
+ * ==========================
  */
+
 function dmParseJson(text) {
     if (!text) return null
     if (typeof text === 'object') return text
@@ -575,8 +592,11 @@ async function dmHttpPostJson(url, body) {
 }
 
 /**
+ * ==========================
  * danmu_api 返回处理
+ * ==========================
  */
+
 function dmPickAnimeList(json) {
     if (!json) return []
 
@@ -649,14 +669,13 @@ function dmExtractMatchedEpisode(matchJson) {
 
     const item = matchJson.matches[0]
     const epTitle = item.episodeTitle || ''
-
     const n = dmExtractEpisodeFromText(epTitle, '')
 
     return n > 0 ? n : 0
 }
 
 /**
- * 提示只保留线路名 + 匹配到第几集
+ * 提示只保留：线路名 + 匹配到第几集
  */
 function dmBuildSimpleMatchToast(matchJson, apiItem) {
     const apiName = apiItem ? apiItem.name : ''
@@ -677,6 +696,9 @@ function dmConvertColor(color) {
     return dmTrim(color)
 }
 
+/**
+ * 取消弹幕数量限制：全量转换 comments
+ */
 async function dmConvertComments(commentJson) {
     const result = []
 
@@ -686,11 +708,7 @@ async function dmConvertComments(commentJson) {
 
     if (!comments || !dmIsArray(comments)) return result
 
-    const maxCount = await dmGetMaxCount()
-
     for (let i = 0; i < comments.length; i++) {
-        if (result.length >= maxCount) break
-
         const item = comments[i]
 
         if (!item) continue
@@ -757,11 +775,13 @@ async function dmGetCommentsByEpisodeId(apiBase, episodeId) {
 }
 
 /**
+ * ==========================
  * UZ type:400
+ * ==========================
  */
+
 async function getLines() {
     const apiList = await dmGetApiList()
-
     const lines = []
 
     for (let i = 0; i < apiList.length; i++) {
@@ -770,17 +790,16 @@ async function getLines() {
 
     return formatBackData({
         lines: lines,
-        error: lines.length > 0 ? '' : '请配置 DANMU_API_LIST'
+        error: lines.length > 0 ? '' : '请配置 自动弹幕API'
     })
 }
 
 /**
  * 手动搜索平台列表：
- * 这里也显示线路名，方便在左侧选择 aws / 韩
+ * 这里显示线路名，例如 aws / 韩
  */
 async function getVideoPlatformList() {
     const apiList = await dmGetApiList()
-
     const platforms = []
 
     for (let i = 0; i < apiList.length; i++) {
@@ -792,7 +811,7 @@ async function getVideoPlatformList() {
 
     return formatBackData({
         data: platforms,
-        error: platforms.length > 0 ? '' : '请配置 DANMU_API_LIST',
+        error: platforms.length > 0 ? '' : '请配置 自动弹幕API',
     })
 }
 
@@ -814,7 +833,7 @@ async function getVideoList(args) {
         const apiItem = await dmSelectApi(selectName)
 
         if (!apiItem) {
-            back.error = '请配置 DANMU_API_LIST'
+            back.error = '请配置 自动弹幕API'
             return formatBackData(back)
         }
 
@@ -928,7 +947,7 @@ async function getVideoEpisodes(args) {
         }
 
         if (!apiBase) {
-            back.error = '请配置 DANMU_API_LIST'
+            back.error = '请配置 自动弹幕API'
             return formatBackData(back)
         }
 
@@ -1044,7 +1063,7 @@ async function searchDanMu(item) {
         const apiItem = await dmSelectApi(selectName)
 
         if (!apiItem) {
-            backData.error = '请配置 DANMU_API_LIST'
+            backData.error = '请配置 自动弹幕API'
             return formatBackData(backData)
         }
 
@@ -1104,7 +1123,7 @@ async function searchDanMu(item) {
             return formatBackData(backData)
         }
 
-        // 提示只保留线路名 + 匹配到第几集
+        // 提示只保留：线路名 + 匹配到第几集
         dmShowToast(dmBuildSimpleMatchToast(matchJson, apiItem))
 
         const ret = await dmGetCommentsByEpisodeId(apiItem.url, episodeId)
