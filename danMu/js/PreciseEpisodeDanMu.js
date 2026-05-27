@@ -143,7 +143,11 @@ function dmIsArray(v) {
 
 function dmPad2(n) {
     n = parseInt(n || 1, 10)
-    if (isNaN(n) || n <= 0) n = 1
+
+    if (isNaN(n) || n <= 0) {
+        n = 1
+    }
+
     return n < 10 ? '0' + n : String(n)
 }
 
@@ -280,7 +284,10 @@ function dmGetEpisode(item) {
 
     if (ep !== undefined && ep !== null && dmTrim(ep) !== '') {
         const m = String(ep).match(/\d+/)
-        if (m) return m[0]
+
+        if (m) {
+            return m[0]
+        }
     }
 
     const title = dmTrim(dmPick(item, [
@@ -302,7 +309,10 @@ function dmGetEpisode(item) {
 
     for (let i = 0; i < patterns.length; i++) {
         const match = title.match(patterns[i])
-        if (match) return match[1]
+
+        if (match) {
+            return match[1]
+        }
     }
 
     return '1'
@@ -317,7 +327,10 @@ function dmGetSeason(item) {
 
     if (season !== undefined && season !== null && dmTrim(season) !== '') {
         const m = String(season).match(/\d+/)
-        if (m) return m[0]
+
+        if (m) {
+            return m[0]
+        }
     }
 
     return '1'
@@ -348,17 +361,26 @@ function dmNormalizeResponse(res) {
     }
 
     if (res.data !== undefined) {
-        if (typeof res.data === 'string') return res.data
+        if (typeof res.data === 'string') {
+            return res.data
+        }
+
         return JSON.stringify(res.data)
     }
 
     if (res.body !== undefined) {
-        if (typeof res.body === 'string') return res.body
+        if (typeof res.body === 'string') {
+            return res.body
+        }
+
         return JSON.stringify(res.body)
     }
 
     if (res.content !== undefined) {
-        if (typeof res.content === 'string') return res.content
+        if (typeof res.content === 'string') {
+            return res.content
+        }
+
         return JSON.stringify(res.content)
     }
 
@@ -417,6 +439,7 @@ function dmExtractEpisodeId(matchJson) {
     ) {
         for (let i = 0; i < matchJson.matches.length; i++) {
             const item = matchJson.matches[i]
+
             if (!item) continue
 
             const id =
@@ -448,6 +471,7 @@ function dmBuildMatchTip(matchJson) {
         matchJson.matches.length > 0
     ) {
         const item = matchJson.matches[0]
+
         if (!item) return ''
 
         const animeTitle = item.animeTitle || ''
@@ -502,6 +526,7 @@ async function dmConvertComments(commentJson) {
         if (result.length >= maxCount) break
 
         const item = comments[i]
+
         if (!item) continue
 
         let content = item.m || item.text || item.content || item.comment || ''
@@ -539,7 +564,9 @@ async function dmConvertComments(commentJson) {
             color = item.color || '16777215'
         }
 
-        if (isNaN(time)) time = 0
+        if (isNaN(time)) {
+            time = 0
+        }
 
         const dan = new DanMu()
         dan.content = content
@@ -607,7 +634,9 @@ async function searchDanMu(item) {
     let backData = new BackData()
 
     try {
-        if (!item) item = {}
+        if (!item) {
+            item = {}
+        }
 
         const apiBase = await dmGetApiBase()
 
