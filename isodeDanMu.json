@@ -2,7 +2,7 @@
   "name": "自动弹幕",
   "codeID": "",
   "url": "https://raw.githubusercontent.com/me26530/uzVideo-extensions/refs/heads/main/danMu/js/PreciseEpisodeDanMu.js",
-  "env": "自动匹配API##多API列表，格式 aws@https://xxx/密钥|韩@https://xxx/密钥&&DANMU_MAX_COUNT##最大弹幕数量，默认8000",
+  "env": "自动弹幕API##多API列表，格式 aws@https://xxx/密钥|韩@https://xxx/密钥&&DANMU_MAX_COUNT##最大弹幕数量，默认8000",
   "remark": "接入 huangxd-/danmu_api，支持多API线路、自动匹配和手动精准选集，不走 FongMi",
   "version": 28,
   "type": 400
