@@ -3,7 +3,7 @@
   "codeID": "",
   "url": "https://raw.githubusercontent.com/me26530/uzVideo-extensions/refs/heads/main/danMu/js/PreciseEpisodeDanMu.js",
   "env": "DANMU_API_BASE##danmu_api服务地址，例如 https://xxx.on.aws/你的TOKEN&&DANMU_MAX_COUNT##最大弹幕数量，默认8000",
-  "remark": "接入 huangxd-/danmu_api，自动匹配弹幕，不走 FongMi，环境变量版，toast显示匹配结果，修复 episode=0",
-  "version": 21,
+  "remark": "接入 huangxd-/danmu_api，自动匹配弹幕，不走 FongMi，优先从文件名识别真实集数",
+  "version": 22,
   "type": 400
 }
