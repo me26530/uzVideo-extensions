@@ -16,7 +16,6 @@
 
 // ignore
 // 不支持导入，这里只是本地开发用于代码提示
-// 如需添加通用依赖，请联系 https://t.me/uzVideoAppbot
 import {
     UZUtils,
     ProData,
@@ -59,13 +58,13 @@ class DanMu {
         this.content = ''
 
         /**
-         * 弹幕出现时间 单位秒
+         * 弹幕出现时间，单位秒
          * @type {number}
          */
         this.time = 0
 
         /**
-         * 弹幕颜色 支持 10 进制 16 进制
+         * 弹幕颜色，支持 10 进制 / 16 进制
          * @type {string}
          */
         this.color = ''
@@ -124,13 +123,14 @@ class DanVideo extends DanEpisode {
 
 /**
  * ==========================
- * danmu_api 配置
+ * 配置区
  * ==========================
  */
 
-const DANMU_API_BASE = 'https://5m36yzdvtmqcrkubdau5axe5lu0qrizy.lambda-url.ap-northeast-1.on.aws/1105074072'
+// 替换成你自己的 danmu_api 地址，不要带最后的 /
+const DANMU_API_BASE = 'https://你的域名/你的TOKEN'
 
-// 最大弹幕数量，避免一次加载过多导致播放器卡顿
+// 最大弹幕数量，避免一次加载 1w+ 导致卡顿
 const DANMU_MAX_COUNT = 8000
 
 /**
@@ -296,13 +296,9 @@ async function dmHttpGet(url) {
 /**
  * POST JSON 请求
  *
- * 这里兼容多种 uz req 写法：
- * 1. data: object
- * 2. data: JSON string
- * 3. body: JSON string
- * 4. params: object
- *
- * 只要返回不再是 Invalid JSON body，就认为请求体被服务端识别。
+ * 重点：
+ * uz 的 req 这里优先用 data: 对象。
+ * 如果服务端返回 Invalid JSON body，再尝试 data: JSON字符串 和 body: JSON字符串。
  */
 async function dmHttpPostJson(url, body) {
     const payload = JSON.stringify(body || {})
@@ -329,11 +325,6 @@ async function dmHttpPostJson(url, body) {
             method: 'POST',
             headers: headers,
             body: payload
-        },
-        {
-            method: 'POST',
-            headers: headers,
-            params: body || {}
         }
     ]
 
@@ -346,7 +337,6 @@ async function dmHttpPostJson(url, body) {
 
         const json = dmParseJson(text)
 
-        // 如果不是 Invalid JSON body，就说明这次 POST body 形式至少被服务端接受了
         if (!json || json.errorMessage !== 'Invalid JSON body') {
             return text
         }
@@ -391,7 +381,7 @@ function dmConvertColor(color) {
 
     color = dmTrim(color)
 
-    // danmu_api 返回颜色通常是 10 进制，如 16777215
+    // danmu_api 返回的是 10 进制颜色，例如 16777215
     return color
 }
 
@@ -461,9 +451,7 @@ function dmConvertComments(commentJson) {
 }
 
 /**
- * 获取所有弹幕线路，可选
- * v1.6.60 及以上版本可用
- * @returns {Promise<{lines: string[], error: string}>}
+ * 获取所有弹幕线路
  */
 async function getLines() {
     return formatBackData({
@@ -476,7 +464,6 @@ async function getLines() {
 
 /**
  * 获取搜索资源平台名称列表，可选
- * @returns {Promise<{data: DanVideoPlatform [], error: string}>}
  */
 async function getVideoPlatformList() {
     return formatBackData({
@@ -487,8 +474,6 @@ async function getVideoPlatformList() {
 
 /**
  * 获取视频列表，可选
- * @param {SearchParameters} args
- * @returns {Promise<{data: DanVideo [], error: string}>}
  */
 async function getVideoList(args) {
     return formatBackData({
@@ -499,8 +484,6 @@ async function getVideoList(args) {
 
 /**
  * 获取剧集列表，可选
- * @param {SearchParameters} args
- * @returns {Promise<{data: DanEpisode[], error: string}>}
  */
 async function getVideoEpisodes(args) {
     return formatBackData({
@@ -511,8 +494,6 @@ async function getVideoEpisodes(args) {
 
 /**
  * 搜索弹幕
- * @param {SearchParameters} item
- * @returns {Promise<BackData>}
  */
 async function searchDanMu(item) {
     let backData = new BackData()
