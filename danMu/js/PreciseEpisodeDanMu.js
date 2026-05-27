@@ -1,9 +1,9 @@
 // ignore
 //@name:danmu_api自动匹配
 // 版本号纯数字
-//@version:20
+//@version:21
 // 备注，没有的话就不填
-//@remark:接入 huangxd-/danmu_api，自动匹配弹幕，不走 FongMi，环境变量版，带匹配提示，修复 episode=0
+//@remark:接入 huangxd-/danmu_api，自动匹配弹幕，不走 FongMi，环境变量版，toast显示匹配结果，修复 episode=0
 // 加密 id，没有的话就不填
 //@codeID:
 // 使用的环境变量，没有的话就不填
@@ -168,7 +168,7 @@ function dmPick(obj, keys, def) {
 /**
  * 读取环境变量
  *
- * 使用 getEnv(appConfig.uzTag, key) 读取扩展环境变量。
+ * 使用 getEnv(appConfig.uzTag, key) 读取当前扩展环境变量。
  */
 async function dmGetEnv(key, def) {
     try {
@@ -500,12 +500,11 @@ function dmExtractEpisodeId(matchJson) {
 }
 
 /**
- * 构造匹配提示弹幕
+ * 构造 toast 匹配提示
  *
- * 示例：
- * 请求：仙逆 第6集 ｜ 已匹配：仙逆(2023)【3D动漫】from tencent - 【qq】 仙逆_06 ｜ID:10007 [3D动漫]
+ * 显示位置由 UZ App 的 toast 控制，也就是顶部红色提示区域。
  */
-function dmBuildMatchTip(matchJson, requestName, requestEpisode) {
+function dmBuildMatchToast(matchJson, requestName, requestEpisode) {
     if (!matchJson) return ''
 
     if (
@@ -519,13 +518,12 @@ function dmBuildMatchTip(matchJson, requestName, requestEpisode) {
 
         const animeTitle = item.animeTitle || ''
         const episodeTitle = item.episodeTitle || ''
-        const type = item.type || ''
         const episodeId = item.episodeId || item.commentId || item.id || ''
 
         let tip = '请求：' + requestName + ' 第' + requestEpisode + '集'
 
         if (animeTitle || episodeTitle) {
-            tip += ' ｜ 已匹配：'
+            tip += '\n匹配：'
         }
 
         if (animeTitle) {
@@ -537,17 +535,21 @@ function dmBuildMatchTip(matchJson, requestName, requestEpisode) {
         }
 
         if (episodeId) {
-            tip += ' ｜ID:' + episodeId
-        }
-
-        if (type) {
-            tip += ' [' + type + ']'
+            tip += '\nID：' + episodeId
         }
 
         return tip
     }
 
     return ''
+}
+
+function dmShowToast(message) {
+    try {
+        if (message) {
+            toast(message)
+        }
+    } catch (e) {}
 }
 
 function dmConvertColor(color) {
@@ -750,12 +752,15 @@ async function searchDanMu(item) {
         }
 
         const episodeId = dmExtractEpisodeId(matchJson)
-        const matchTip = dmBuildMatchTip(matchJson, name, episode)
+        const matchToast = dmBuildMatchToast(matchJson, name, episode)
 
         if (!episodeId) {
             backData.error = '自动匹配成功但未找到 episodeId'
             return formatBackData(backData)
         }
+
+        // 在顶部 toast 区域提示实际匹配结果
+        dmShowToast(matchToast)
 
         const commentUrl =
             apiBase +
@@ -772,21 +777,6 @@ async function searchDanMu(item) {
         }
 
         const all = await dmConvertComments(commentJson)
-
-        // 在弹幕最前面加入匹配提示
-        // 不放在 0 秒，避免被大量 0 秒弹幕挤掉
-        if (matchTip) {
-            const tipTimes = [1, 3, 5]
-
-            for (let i = tipTimes.length - 1; i >= 0; i--) {
-                const tipDan = new DanMu()
-                tipDan.content = matchTip
-                tipDan.time = tipTimes[i]
-                tipDan.color = '16776960' // 黄色
-
-                all.unshift(tipDan)
-            }
-        }
 
         backData.data = all
     } catch (error) {
