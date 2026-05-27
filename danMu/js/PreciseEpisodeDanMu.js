@@ -1,9 +1,9 @@
 // ignore
 //@name:danmu_api自动匹配
 // 版本号纯数字
-//@version:19
+//@version:20
 // 备注，没有的话就不填
-//@remark:接入 huangxd-/danmu_api，自动匹配弹幕，不走 FongMi，环境变量版，带匹配提示
+//@remark:接入 huangxd-/danmu_api，自动匹配弹幕，不走 FongMi，环境变量版，带匹配提示，修复 episode=0
 // 加密 id，没有的话就不填
 //@codeID:
 // 使用的环境变量，没有的话就不填
@@ -168,7 +168,7 @@ function dmPick(obj, keys, def) {
 /**
  * 读取环境变量
  *
- * UZ type:400 需要使用 appConfig.uzTag 读取扩展环境变量。
+ * 使用 getEnv(appConfig.uzTag, key) 读取扩展环境变量。
  */
 async function dmGetEnv(key, def) {
     try {
@@ -197,7 +197,6 @@ async function dmGetEnv(key, def) {
 
     return def
 }
-
 
 /**
  * 获取 danmu_api 基础地址
@@ -271,6 +270,14 @@ function dmGetName(item) {
     return name
 }
 
+/**
+ * 获取集数
+ *
+ * 修复：
+ * - episode 为 0 时不直接使用；
+ * - videoUrl 为纯数字时，优先作为集数兜底；
+ * - 最终保证返回大于 0 的集数。
+ */
 function dmGetEpisode(item) {
     let ep = dmPick(item, [
         'episode',
@@ -286,7 +293,32 @@ function dmGetEpisode(item) {
         const m = String(ep).match(/\d+/)
 
         if (m) {
-            return m[0]
+            const n = parseInt(m[0], 10)
+
+            if (!isNaN(n) && n > 0) {
+                return String(n)
+            }
+        }
+    }
+
+    /**
+     * 兜底：
+     * 有些情况下 UZ 会传 episode:0，
+     * 但 videoUrl 里是实际集数，例如 videoUrl:"5"
+     */
+    const videoUrl = dmPick(item, [
+        'videoUrl'
+    ], '')
+
+    if (videoUrl !== undefined && videoUrl !== null && dmTrim(videoUrl) !== '') {
+        const vu = dmTrim(videoUrl)
+
+        if (/^\d+$/.test(vu)) {
+            const n2 = parseInt(vu, 10)
+
+            if (!isNaN(n2) && n2 > 0) {
+                return String(n2)
+            }
         }
     }
 
@@ -311,7 +343,11 @@ function dmGetEpisode(item) {
         const match = title.match(patterns[i])
 
         if (match) {
-            return match[1]
+            const n3 = parseInt(match[1], 10)
+
+            if (!isNaN(n3) && n3 > 0) {
+                return String(n3)
+            }
         }
     }
 
@@ -329,7 +365,11 @@ function dmGetSeason(item) {
         const m = String(season).match(/\d+/)
 
         if (m) {
-            return m[0]
+            const n = parseInt(m[0], 10)
+
+            if (!isNaN(n) && n > 0) {
+                return String(n)
+            }
         }
     }
 
@@ -461,8 +501,11 @@ function dmExtractEpisodeId(matchJson) {
 
 /**
  * 构造匹配提示弹幕
+ *
+ * 示例：
+ * 请求：仙逆 第6集 ｜ 已匹配：仙逆(2023)【3D动漫】from tencent - 【qq】 仙逆_06 ｜ID:10007 [3D动漫]
  */
-function dmBuildMatchTip(matchJson) {
+function dmBuildMatchTip(matchJson, requestName, requestEpisode) {
     if (!matchJson) return ''
 
     if (
@@ -477,8 +520,13 @@ function dmBuildMatchTip(matchJson) {
         const animeTitle = item.animeTitle || ''
         const episodeTitle = item.episodeTitle || ''
         const type = item.type || ''
+        const episodeId = item.episodeId || item.commentId || item.id || ''
 
-        let tip = '已匹配：'
+        let tip = '请求：' + requestName + ' 第' + requestEpisode + '集'
+
+        if (animeTitle || episodeTitle) {
+            tip += ' ｜ 已匹配：'
+        }
 
         if (animeTitle) {
             tip += animeTitle
@@ -486,6 +534,10 @@ function dmBuildMatchTip(matchJson) {
 
         if (episodeTitle) {
             tip += ' - ' + episodeTitle
+        }
+
+        if (episodeId) {
+            tip += ' ｜ID:' + episodeId
         }
 
         if (type) {
@@ -651,8 +703,18 @@ async function searchDanMu(item) {
         }
 
         const name = dmGetName(item)
-        const episode = dmGetEpisode(item)
-        const season = dmGetSeason(item)
+
+        let episode = parseInt(dmGetEpisode(item), 10)
+
+        if (isNaN(episode) || episode <= 0) {
+            episode = 1
+        }
+
+        let season = parseInt(dmGetSeason(item), 10)
+
+        if (isNaN(season) || season <= 0) {
+            season = 1
+        }
 
         if (!name) {
             backData.error = '缺少影片名称'
@@ -666,10 +728,10 @@ async function searchDanMu(item) {
             title: name,
             animeTitle: name,
             videoName: keyword,
-            episode: parseInt(episode || '1', 10),
-            episodeNumber: parseInt(episode || '1', 10),
-            season: parseInt(season || '1', 10),
-            seasonNumber: parseInt(season || '1', 10)
+            episode: episode,
+            episodeNumber: episode,
+            season: season,
+            seasonNumber: season
         }
 
         const matchUrl = apiBase + '/api/v2/match'
@@ -678,7 +740,7 @@ async function searchDanMu(item) {
         const matchJson = dmParseJson(matchText)
 
         if (!matchJson) {
-            backData.error = 'match 接口返回不是 JSON'
+            backData.error = 'match 接口返回不是 JSON：' + String(matchText).substring(0, 200)
             return formatBackData(backData)
         }
 
@@ -688,7 +750,7 @@ async function searchDanMu(item) {
         }
 
         const episodeId = dmExtractEpisodeId(matchJson)
-        const matchTip = dmBuildMatchTip(matchJson)
+        const matchTip = dmBuildMatchTip(matchJson, name, episode)
 
         if (!episodeId) {
             backData.error = '自动匹配成功但未找到 episodeId'
@@ -705,20 +767,25 @@ async function searchDanMu(item) {
         const commentJson = dmParseJson(commentText)
 
         if (!commentJson) {
-            backData.error = 'comment 接口返回不是 JSON'
+            backData.error = 'comment 接口返回不是 JSON：' + String(commentText).substring(0, 200)
             return formatBackData(backData)
         }
 
         const all = await dmConvertComments(commentJson)
 
         // 在弹幕最前面加入匹配提示
+        // 不放在 0 秒，避免被大量 0 秒弹幕挤掉
         if (matchTip) {
-            const tipDan = new DanMu()
-            tipDan.content = matchTip
-            tipDan.time = 0
-            tipDan.color = '16776960' // 黄色
+            const tipTimes = [1, 3, 5]
 
-            all.unshift(tipDan)
+            for (let i = tipTimes.length - 1; i >= 0; i--) {
+                const tipDan = new DanMu()
+                tipDan.content = matchTip
+                tipDan.time = tipTimes[i]
+                tipDan.color = '16776960' // 黄色
+
+                all.unshift(tipDan)
+            }
         }
 
         backData.data = all
