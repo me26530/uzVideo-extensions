@@ -7,7 +7,7 @@
 // 加密 id，没有的话就不填
 //@codeID:
 // 使用的环境变量，没有的话就不填
-//@env:自动弹幕api##多API列表，格式 aws@https://xxx/密钥|韩@https://xxx/密钥&&DANMU_MAX_COUNT##最大弹幕数量，默认8000
+//@env:自动弹幕API##多API列表，格式 aws@https://xxx/密钥|韩@https://xxx/密钥&&DANMU_MAX_COUNT##最大弹幕数量，默认8000
 // 是否是AV 1是  0否
 //@isAV:0
 //是否弃用 1是  0否
@@ -183,8 +183,8 @@ function dmNormalizeApiBase(base) {
 }
 
 async function dmGetApiList() {
-    // 新变量名：自动匹配API
-    let raw = await dmGetEnv('自动匹配API', '')
+    // 新变量名：自动弹幕API
+    let raw = await dmGetEnv('自动弹幕API', '')
 
     // 兼容旧变量名 DANMU_API_LIST
     if (!raw) {
