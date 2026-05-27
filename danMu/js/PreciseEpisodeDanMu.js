@@ -1,9 +1,9 @@
 // ignore
 //@name:danmu_api自动匹配
 // 版本号纯数字
-//@version:21
+//@version:22
 // 备注，没有的话就不填
-//@remark:接入 huangxd-/danmu_api，自动匹配弹幕，不走 FongMi，环境变量版，toast显示匹配结果，修复 episode=0
+//@remark:接入 huangxd-/danmu_api，自动匹配弹幕，不走 FongMi，优先从文件名识别真实集数
 // 加密 id，没有的话就不填
 //@codeID:
 // 使用的环境变量，没有的话就不填
@@ -51,38 +51,15 @@ const appConfig = {
 
 class DanMu {
     constructor() {
-        /**
-         * 弹幕内容
-         * @type {string}
-         */
         this.content = ''
-
-        /**
-         * 弹幕出现时间，单位秒
-         * @type {number}
-         */
         this.time = 0
-
-        /**
-         * 弹幕颜色，支持 10 进制 / 16 进制
-         * @type {string}
-         */
         this.color = ''
     }
 }
 
 class BackData {
     constructor() {
-        /**
-         * 弹幕数据
-         * @type {DanMu[]}
-         */
         this.data = []
-
-        /**
-         * 错误信息
-         * @type {string}
-         */
         this.error = ''
     }
 }
@@ -165,11 +142,20 @@ function dmPick(obj, keys, def) {
     return def
 }
 
+function dmShowToast(message) {
+    try {
+        if (message) {
+            toast(message)
+        }
+    } catch (e) {}
+}
+
 /**
- * 读取环境变量
- *
- * 使用 getEnv(appConfig.uzTag, key) 读取当前扩展环境变量。
+ * ==========================
+ * 环境变量
+ * ==========================
  */
+
 async function dmGetEnv(key, def) {
     try {
         let v = await getEnv(appConfig.uzTag, key)
@@ -198,31 +184,17 @@ async function dmGetEnv(key, def) {
     return def
 }
 
-/**
- * 获取 danmu_api 基础地址
- *
- * 正确填写：
- * https://你的域名/你的TOKEN
- *
- * 不要填写：
- * /api/v2/match
- * /api/v2/comment
- * /api/logs
- */
 async function dmGetApiBase() {
     let base = await dmGetEnv('DANMU_API_BASE', '')
 
     base = dmTrim(base)
 
-    // 去掉可能误填的引号
     base = base.replace(/^['"]+|['"]+$/g, '')
 
-    // 去掉末尾 /
     while (base.length > 0 && base.charAt(base.length - 1) === '/') {
         base = base.substring(0, base.length - 1)
     }
 
-    // 如果误填到了具体接口，自动裁剪到 token 层
     base = base.replace(/\/api\/v2\/match$/i, '')
     base = base.replace(/\/api\/v2\/comment.*$/i, '')
     base = base.replace(/\/api\/logs$/i, '')
@@ -247,7 +219,7 @@ async function dmGetMaxCount() {
 
 /**
  * ==========================
- * 参数解析
+ * 剧名与真实集数识别
  * ==========================
  */
 
@@ -258,8 +230,7 @@ function dmGetName(item) {
         'vod_name',
         'videoName',
         'movieName',
-        'showName',
-        'danVideo'
+        'showName'
     ], '')
 
     name = dmTrim(name)
@@ -271,17 +242,211 @@ function dmGetName(item) {
 }
 
 /**
- * 获取集数
+ * 从路径或 URL 中取文件名
+ */
+function dmGetBaseNameFromUrl(text) {
+    text = dmTrim(text)
+
+    if (!text) return ''
+
+    try {
+        text = decodeURIComponent(text)
+    } catch (e) {}
+
+    text = text.split('?')[0]
+    text = text.split('#')[0]
+
+    const arr = text.split(/[\\/]/)
+    return arr[arr.length - 1] || text
+}
+
+/**
+ * 判断数字是否像集数
+ * 避免把 3840、1632、1080、2160、2024 之类识别成集数。
+ */
+function dmIsLikelyEpisodeNumber(n) {
+    n = parseInt(n, 10)
+
+    if (isNaN(n) || n <= 0) return false
+
+    if (n > 2000) return false
+
+    const badNums = [
+        480, 720, 1080, 1440, 2160, 3840, 4096,
+        1632, 1920, 1280, 2560
+    ]
+
+    if (badNums.indexOf(n) >= 0) return false
+
+    if (n >= 1900 && n <= 2099) return false
+
+    return true
+}
+
+/**
+ * 从文本、文件名、播放地址中提取真实集数。
  *
- * 修复：
- * - episode 为 0 时不直接使用；
- * - videoUrl 为纯数字时，优先作为集数兜底；
- * - 最终保证返回大于 0 的集数。
+ * 支持：
+ * 仙逆137.mp4
+ * 仙逆_137
+ * 仙逆-137
+ * 仙逆 第137集
+ * S01E137
+ * EP137
+ * E137
+ * videoUrl: "5"
+ */
+function dmExtractEpisodeFromText(text, seriesName) {
+    text = dmTrim(text)
+
+    if (!text) return 0
+
+    try {
+        text = decodeURIComponent(text)
+    } catch (e) {}
+
+    const baseName = dmGetBaseNameFromUrl(text)
+
+    const candidates = [
+        baseName,
+        text
+    ]
+
+    for (let c = 0; c < candidates.length; c++) {
+        let s = candidates[c]
+
+        if (!s) continue
+
+        s = s.replace(/\.(mp4|mkv|avi|mov|flv|ts|m3u8|webm)$/i, '')
+
+        const patterns = [
+            /S\d+\s*E\s*0*(\d+)/i,
+            /EP\s*0*(\d+)/i,
+            /E\s*0*(\d+)/i,
+            /第\s*0*(\d+)\s*[集话話]/,
+            /[_\-\.\s]0*(\d{1,4})(?:$|[_\-\.\s])/,
+        ]
+
+        for (let i = 0; i < patterns.length; i++) {
+            const m = s.match(patterns[i])
+
+            if (m && m[1]) {
+                const n = parseInt(m[1], 10)
+
+                if (dmIsLikelyEpisodeNumber(n)) {
+                    return n
+                }
+            }
+        }
+
+        /**
+         * 特殊处理：
+         * 仙逆137
+         * 剑来05
+         */
+        if (seriesName) {
+            const safeName = dmTrim(seriesName).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+            const re = new RegExp(safeName + '\\s*0*(\\d{1,4})', 'i')
+            const m2 = s.match(re)
+
+            if (m2 && m2[1]) {
+                const n2 = parseInt(m2[1], 10)
+
+                if (dmIsLikelyEpisodeNumber(n2)) {
+                    return n2
+                }
+            }
+        }
+
+        /**
+         * 最后兜底：
+         * 取文件名里的最后一个合理数字。
+         * 例如：仙逆137 -> 137
+         */
+        const allNums = s.match(/\d{1,4}/g)
+
+        if (allNums && allNums.length > 0) {
+            for (let j = allNums.length - 1; j >= 0; j--) {
+                const n3 = parseInt(allNums[j], 10)
+
+                if (dmIsLikelyEpisodeNumber(n3)) {
+                    return n3
+                }
+            }
+        }
+    }
+
+    return 0
+}
+
+/**
+ * 获取真实集数
+ *
+ * 优先级：
+ * 1. videoUrl / 文件名 / 播放路径
+ * 2. danEpisode / danVideo 名称
+ * 3. UZ 给的 episode
+ * 4. 其它标题字段
+ * 5. 默认 1
  */
 function dmGetEpisode(item) {
+    const seriesName = dmGetName(item)
+
+    /**
+     * 第一优先级：从 videoUrl 或播放文件名识别
+     */
+    const videoUrl = dmPick(item, [
+        'videoUrl'
+    ], '')
+
+    const epFromVideoUrl = dmExtractEpisodeFromText(videoUrl, seriesName)
+
+    if (epFromVideoUrl > 0) {
+        return String(epFromVideoUrl)
+    }
+
+    /**
+     * 第二优先级：从 danEpisode 里识别
+     */
+    try {
+        if (item && item.danEpisode) {
+            const epText =
+                item.danEpisode.vod_name ||
+                item.danEpisode.vod_remarks ||
+                ''
+
+            const epFromDanEpisode = dmExtractEpisodeFromText(epText, seriesName)
+
+            if (epFromDanEpisode > 0) {
+                return String(epFromDanEpisode)
+            }
+        }
+    } catch (e) {}
+
+    /**
+     * 第二优先级：从 danVideo 里识别
+     */
+    try {
+        if (item && item.danVideo) {
+            const videoText =
+                item.danVideo.vod_name ||
+                item.danVideo.vod_remarks ||
+                ''
+
+            const epFromDanVideo = dmExtractEpisodeFromText(videoText, seriesName)
+
+            if (epFromDanVideo > 0) {
+                return String(epFromDanVideo)
+            }
+        }
+    } catch (e2) {}
+
+    /**
+     * 第三优先级：UZ 给的 episode
+     * 仅 episode > 0 时使用
+     */
     let ep = dmPick(item, [
         'episode',
-        'danEpisode',
         'episodeIndex',
         'index',
         'serial',
@@ -302,26 +467,8 @@ function dmGetEpisode(item) {
     }
 
     /**
-     * 兜底：
-     * 有些情况下 UZ 会传 episode:0，
-     * 但 videoUrl 里是实际集数，例如 videoUrl:"5"
+     * 第四优先级：其它字段
      */
-    const videoUrl = dmPick(item, [
-        'videoUrl'
-    ], '')
-
-    if (videoUrl !== undefined && videoUrl !== null && dmTrim(videoUrl) !== '') {
-        const vu = dmTrim(videoUrl)
-
-        if (/^\d+$/.test(vu)) {
-            const n2 = parseInt(vu, 10)
-
-            if (!isNaN(n2) && n2 > 0) {
-                return String(n2)
-            }
-        }
-    }
-
     const title = dmTrim(dmPick(item, [
         'subTitle',
         'episodeName',
@@ -331,24 +478,10 @@ function dmGetEpisode(item) {
         'line'
     ], ''))
 
-    const patterns = [
-        /第\s*(\d+)\s*[集话話]/,
-        /S\d+\s*E(\d+)/i,
-        /E(\d+)/i,
-        /EP\s*(\d+)/i,
-        /(\d+)/
-    ]
+    const epFromTitle = dmExtractEpisodeFromText(title, seriesName)
 
-    for (let i = 0; i < patterns.length; i++) {
-        const match = title.match(patterns[i])
-
-        if (match) {
-            const n3 = parseInt(match[1], 10)
-
-            if (!isNaN(n3) && n3 > 0) {
-                return String(n3)
-            }
-        }
+    if (epFromTitle > 0) {
+        return String(epFromTitle)
     }
 
     return '1'
@@ -427,9 +560,6 @@ function dmNormalizeResponse(res) {
     return JSON.stringify(res)
 }
 
-/**
- * GET 请求
- */
 async function dmHttpGet(url) {
     const res = await req(url, {
         method: 'GET',
@@ -443,8 +573,6 @@ async function dmHttpGet(url) {
 }
 
 /**
- * POST JSON 请求
- *
  * 已验证：
  * UZ req 对 danmu_api /api/v2/match 使用 data: 对象可正常请求。
  */
@@ -499,11 +627,6 @@ function dmExtractEpisodeId(matchJson) {
     return ''
 }
 
-/**
- * 构造 toast 匹配提示
- *
- * 显示位置由 UZ App 的 toast 控制，也就是顶部红色提示区域。
- */
 function dmBuildMatchToast(matchJson, requestName, requestEpisode) {
     if (!matchJson) return ''
 
@@ -520,7 +643,7 @@ function dmBuildMatchToast(matchJson, requestName, requestEpisode) {
         const episodeTitle = item.episodeTitle || ''
         const episodeId = item.episodeId || item.commentId || item.id || ''
 
-        let tip = '请求：' + requestName + ' 第' + requestEpisode + '集'
+        let tip = '识别集数：第' + requestEpisode + '集'
 
         if (animeTitle || episodeTitle) {
             tip += '\n匹配：'
@@ -544,14 +667,6 @@ function dmBuildMatchToast(matchJson, requestName, requestEpisode) {
     return ''
 }
 
-function dmShowToast(message) {
-    try {
-        if (message) {
-            toast(message)
-        }
-    } catch (e) {}
-}
-
 function dmConvertColor(color) {
     if (color === undefined || color === null || color === '') {
         return '16777215'
@@ -559,7 +674,6 @@ function dmConvertColor(color) {
 
     color = dmTrim(color)
 
-    // danmu_api 返回的是 10 进制颜色，例如 16777215
     return color
 }
 
@@ -591,13 +705,6 @@ async function dmConvertComments(commentJson) {
         let time = 0
         let color = '16777215'
 
-        /**
-         * danmu_api 返回格式：
-         * {
-         *   p: "0.00,1,16777215,[qq]",
-         *   m: "弹幕内容"
-         * }
-         */
         if (item.p !== undefined && item.p !== null) {
             const parts = String(item.p).split(',')
 
@@ -639,9 +746,6 @@ async function dmConvertComments(commentJson) {
  * ==========================
  */
 
-/**
- * 获取所有弹幕线路
- */
 async function getLines() {
     return formatBackData({
         lines: [
@@ -651,9 +755,6 @@ async function getLines() {
     })
 }
 
-/**
- * 获取搜索资源平台名称列表，可选
- */
 async function getVideoPlatformList() {
     return formatBackData({
         data: [],
@@ -661,9 +762,6 @@ async function getVideoPlatformList() {
     })
 }
 
-/**
- * 获取视频列表，可选
- */
 async function getVideoList(args) {
     return formatBackData({
         data: [],
@@ -671,9 +769,6 @@ async function getVideoList(args) {
     })
 }
 
-/**
- * 获取剧集列表，可选
- */
 async function getVideoEpisodes(args) {
     return formatBackData({
         data: [],
@@ -681,9 +776,6 @@ async function getVideoEpisodes(args) {
     })
 }
 
-/**
- * 搜索弹幕
- */
 async function searchDanMu(item) {
     let backData = new BackData()
 
@@ -723,6 +815,9 @@ async function searchDanMu(item) {
             return formatBackData(backData)
         }
 
+        // 显示识别出来的真实集数，便于确认是否绕过 UZ 错误集数
+        dmShowToast('自动识别集数：第' + episode + '集')
+
         const keyword = name + ' S' + dmPad2(season) + 'E' + dmPad2(episode)
 
         const matchBody = {
@@ -752,14 +847,13 @@ async function searchDanMu(item) {
         }
 
         const episodeId = dmExtractEpisodeId(matchJson)
-        const matchToast = dmBuildMatchToast(matchJson, name, episode)
 
         if (!episodeId) {
             backData.error = '自动匹配成功但未找到 episodeId'
             return formatBackData(backData)
         }
 
-        // 在顶部 toast 区域提示实际匹配结果
+        const matchToast = dmBuildMatchToast(matchJson, name, episode)
         dmShowToast(matchToast)
 
         const commentUrl =
