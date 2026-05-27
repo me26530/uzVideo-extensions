@@ -1,13 +1,13 @@
 // ignore
 //@name:danmu_api自动匹配
 // 版本号纯数字
-//@version:14
+//@version:15
 // 备注，没有的话就不填
-//@remark:接入 huangxd-/danmu_api，自动匹配弹幕，不走 FongMi
+//@remark:接入 huangxd-/danmu_api，自动匹配弹幕，不走 FongMi，环境变量版
 // 加密 id，没有的话就不填
 //@codeID:
 // 使用的环境变量，没有的话就不填
-//@env:
+//@env:DANMU_API_BASE##danmu_api服务地址，例如 https://xxx.on.aws/你的TOKEN&&DANMU_MAX_COUNT##最大弹幕数量，默认8000
 // 是否是AV 1是  0否
 //@isAV:0
 //是否弃用 1是  0否
@@ -123,15 +123,12 @@ class DanVideo extends DanEpisode {
 
 /**
  * ==========================
- * 配置区
+ * 默认配置
  * ==========================
  */
 
-// 替换成你自己的 danmu_api 地址，不要带最后的 /
-const DANMU_API_BASE = 'https://你的域名/你的TOKEN'
-
-// 最大弹幕数量，避免一次加载 1w+ 导致卡顿
-const DANMU_MAX_COUNT = 8000
+// 不写死 API 地址。必须通过环境变量 DANMU_API_BASE 配置。
+const DANMU_MAX_COUNT_DEFAULT = 8000
 
 /**
  * ==========================
@@ -165,6 +162,54 @@ function dmPick(obj, keys, def) {
     }
 
     return def
+}
+
+/**
+ * 读取环境变量
+ *
+ * 兼容两种写法：
+ * 1. getEnv(appConfig.uzTag, key)
+ * 2. getEnv(key)
+ */
+function dmGetEnv(key, def) {
+    try {
+        const v = getEnv(appConfig.uzTag, key)
+        if (v !== undefined && v !== null && dmTrim(v) !== '') {
+            return dmTrim(v)
+        }
+    } catch (e) {}
+
+    try {
+        const v2 = getEnv(key)
+        if (v2 !== undefined && v2 !== null && dmTrim(v2) !== '') {
+            return dmTrim(v2)
+        }
+    } catch (e2) {}
+
+    return def
+}
+
+function dmGetApiBase() {
+    let base = dmGetEnv('DANMU_API_BASE', '')
+
+    base = dmTrim(base)
+
+    while (base.length > 0 && base.charAt(base.length - 1) === '/') {
+        base = base.substring(0, base.length - 1)
+    }
+
+    return base
+}
+
+function dmGetMaxCount() {
+    const value = dmGetEnv('DANMU_MAX_COUNT', String(DANMU_MAX_COUNT_DEFAULT))
+    const n = parseInt(value, 10)
+
+    if (isNaN(n) || n <= 0) {
+        return DANMU_MAX_COUNT_DEFAULT
+    }
+
+    return n
 }
 
 function dmGetName(item) {
@@ -297,7 +342,7 @@ async function dmHttpGet(url) {
  * POST JSON 请求
  *
  * 重点：
- * uz 的 req 这里优先用 data: 对象。
+ * UZ 的 req 在这里优先使用 data: 对象。
  * 如果服务端返回 Invalid JSON body，再尝试 data: JSON字符串 和 body: JSON字符串。
  */
 async function dmHttpPostJson(url, body) {
@@ -396,8 +441,10 @@ function dmConvertComments(commentJson) {
         return result
     }
 
+    const maxCount = dmGetMaxCount()
+
     for (let i = 0; i < comments.length; i++) {
-        if (result.length >= DANMU_MAX_COUNT) break
+        if (result.length >= maxCount) break
 
         const item = comments[i]
         if (!item) continue
@@ -501,6 +548,18 @@ async function searchDanMu(item) {
     try {
         if (!item) item = {}
 
+        const apiBase = dmGetApiBase()
+
+        if (!apiBase) {
+            backData.error = '请先配置环境变量 DANMU_API_BASE'
+            return formatBackData(backData)
+        }
+
+        if (apiBase.indexOf('http') !== 0) {
+            backData.error = 'DANMU_API_BASE 格式错误，应类似 https://xxx/你的TOKEN'
+            return formatBackData(backData)
+        }
+
         const name = dmGetName(item)
         const episode = dmGetEpisode(item)
         const season = dmGetSeason(item)
@@ -523,7 +582,7 @@ async function searchDanMu(item) {
             seasonNumber: parseInt(season || '1', 10)
         }
 
-        const matchUrl = DANMU_API_BASE + '/api/v2/match'
+        const matchUrl = apiBase + '/api/v2/match'
 
         const matchText = await dmHttpPostJson(matchUrl, matchBody)
         const matchJson = dmParseJson(matchText)
@@ -546,7 +605,7 @@ async function searchDanMu(item) {
         }
 
         const commentUrl =
-            DANMU_API_BASE +
+            apiBase +
             '/api/v2/comment/' +
             encodeURIComponent(episodeId) +
             '?format=json&duration=true'
