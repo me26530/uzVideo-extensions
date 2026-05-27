@@ -1,7 +1,7 @@
 // ignore
 //@name:danmu_api自动匹配
 // 版本号纯数字
-//@version:16
+//@version:17
 // 备注，没有的话就不填
 //@remark:接入 huangxd-/danmu_api，自动匹配弹幕，不走 FongMi，环境变量版
 // 加密 id，没有的话就不填
@@ -41,10 +41,6 @@ import {
 
 const appConfig = {
     _uzTag: '',
-    /**
-     * 扩展标识，初次加载时，uz 会自动赋值，请勿修改
-     * 用于读取环境变量
-     */
     get uzTag() {
         return this._uzTag
     },
@@ -153,19 +149,10 @@ class DanVideo extends DanEpisode {
 }
 
 /**
- * ==========================
- * 默认配置
- * ==========================
+ * 默认最大弹幕数
+ * 可通过环境变量 DANMU_MAX_COUNT 覆盖
  */
-
-// 不写死 API 地址，必须通过环境变量 DANMU_API_BASE 配置
 const DANMU_MAX_COUNT_DEFAULT = 8000
-
-/**
- * ==========================
- * 通用工具函数
- * ==========================
- */
 
 function dmTrim(v) {
     return String(v || '').replace(/^\s+|\s+$/g, '')
@@ -196,15 +183,9 @@ function dmPick(obj, keys, def) {
 }
 
 /**
- * ==========================
- * 环境变量读取
- * ==========================
+ * 读取环境变量
  *
- * 注意：
- * UZ 的 getEnv 可能是异步，也可能返回普通值。
- * 所以这里统一 await。
- *
- * 同时兼容：
+ * 兼容：
  * 1. getEnv(appConfig.uzTag, key)
  * 2. getEnv(key)
  */
@@ -284,7 +265,7 @@ async function dmGetApiBase() {
         base = base.substring(0, base.length - 1)
     }
 
-    // 如果用户误填到了具体接口，自动裁剪到 token 层
+    // 如果误填到了具体接口，自动裁剪到 token 层
     base = base.replace(/\/api\/v2\/match$/i, '')
     base = base.replace(/\/api\/v2\/comment.*$/i, '')
     base = base.replace(/\/api\/logs$/i, '')
@@ -306,12 +287,6 @@ async function dmGetMaxCount() {
 
     return n
 }
-
-/**
- * ==========================
- * 搜索参数处理
- * ==========================
- */
 
 function dmGetName(item) {
     let name = dmPick(item, [
@@ -388,12 +363,6 @@ function dmGetSeason(item) {
     return '1'
 }
 
-/**
- * ==========================
- * 网络请求与 JSON 处理
- * ==========================
- */
-
 function dmParseJson(text) {
     if (!text) return null
     if (typeof text === 'object') return text
@@ -430,6 +399,9 @@ function dmNormalizeResponse(res) {
     return JSON.stringify(res)
 }
 
+/**
+ * GET 请求
+ */
 async function dmHttpGet(url) {
     const res = await req(url, {
         method: 'GET',
@@ -445,60 +417,22 @@ async function dmHttpGet(url) {
 /**
  * POST JSON 请求
  *
- * 重点：
- * UZ 的 req 这里优先使用 data: 对象。
- * 如果服务端返回 Invalid JSON body，再尝试 data: JSON字符串 和 body: JSON字符串。
+ * 已确认 UZ req 对 danmu_api match 接口使用 data: 对象可以正常请求。
  */
 async function dmHttpPostJson(url, body) {
-    const payload = JSON.stringify(body || {})
-
-    const headers = {
-        'User-Agent': 'Mozilla/5.0',
-        'Accept': 'application/json,text/plain,*/*',
-        'Content-Type': 'application/json',
-        'content-type': 'application/json'
-    }
-
-    const tryList = [
-        {
-            method: 'POST',
-            headers: headers,
-            data: body || {}
+    const res = await req(url, {
+        method: 'POST',
+        headers: {
+            'User-Agent': 'Mozilla/5.0',
+            'Accept': 'application/json,text/plain,*/*',
+            'Content-Type': 'application/json',
+            'content-type': 'application/json'
         },
-        {
-            method: 'POST',
-            headers: headers,
-            data: payload
-        },
-        {
-            method: 'POST',
-            headers: headers,
-            body: payload
-        }
-    ]
+        data: body || {}
+    })
 
-    let lastText = ''
-
-    for (let i = 0; i < tryList.length; i++) {
-        const res = await req(url, tryList[i])
-        const text = dmNormalizeResponse(res)
-        lastText = text
-
-        const json = dmParseJson(text)
-
-        if (!json || json.errorMessage !== 'Invalid JSON body') {
-            return text
-        }
-    }
-
-    return lastText
+    return dmNormalizeResponse(res)
 }
-
-/**
- * ==========================
- * danmu_api 返回数据处理
- * ==========================
- */
 
 function dmExtractEpisodeId(matchJson) {
     if (!matchJson) return ''
@@ -606,12 +540,6 @@ async function dmConvertComments(commentJson) {
 
     return result
 }
-
-/**
- * ==========================
- * UZ type:400 必须实现的全局函数
- * ==========================
- */
 
 /**
  * 获取所有弹幕线路
