@@ -1,6 +1,6 @@
 // ignore
 //@name:danmu_api自动匹配硬编码
-//@version:100
+//@version:9
 //@remark:huangxd-/danmu_api 自动匹配弹幕，不走 FongMi，硬编码API地址
 //@codeID:
 //@env:
