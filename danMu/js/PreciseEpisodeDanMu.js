@@ -1,5 +1,5 @@
 // ignore
-//@name:danmu_api自动匹配
+//@name:自动弹幕
 // 版本号纯数字
 //@version:29
 // 备注，没有的话就不填
