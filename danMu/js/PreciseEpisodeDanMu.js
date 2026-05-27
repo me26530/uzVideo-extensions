@@ -1,13 +1,13 @@
 // ignore
 //@name:danmu_api自动匹配
 // 版本号纯数字
-//@version:23
+//@version:25
 // 备注，没有的话就不填
-//@remark:接入 huangxd-/danmu_api，自动匹配弹幕，不走 FongMi，判断真实集数来源
+//@remark:接入 huangxd-/danmu_api，支持多API线路，自动匹配和手动精准选集，不走 FongMi
 // 加密 id，没有的话就不填
 //@codeID:
 // 使用的环境变量，没有的话就不填
-//@env:DANMU_API_BASE##danmu_api服务地址，例如 https://xxx.on.aws/你的TOKEN&&DANMU_MAX_COUNT##最大弹幕数量，默认8000
+//@env:DANMU_API_LIST##多API列表，格式 aws@https://xxx/密钥|韩@https://xxx/密钥&&DANMU_MAX_COUNT##最大弹幕数量，默认8000
 // 是否是AV 1是  0否
 //@isAV:0
 //是否弃用 1是  0否
@@ -116,11 +116,7 @@ function dmIsArray(v) {
 
 function dmPad2(n) {
     n = parseInt(n || 1, 10)
-
-    if (isNaN(n) || n <= 0) {
-        n = 1
-    }
-
+    if (isNaN(n) || n <= 0) n = 1
     return n < 10 ? '0' + n : String(n)
 }
 
@@ -129,7 +125,6 @@ function dmPick(obj, keys, def) {
 
     for (let i = 0; i < keys.length; i++) {
         const k = keys[i]
-
         if (obj[k] !== undefined && obj[k] !== null && dmTrim(obj[k]) !== '') {
             return obj[k]
         }
@@ -140,9 +135,7 @@ function dmPick(obj, keys, def) {
 
 function dmShowToast(message) {
     try {
-        if (message) {
-            toast(message)
-        }
+        if (message) toast(message)
     } catch (e) {}
 }
 
@@ -171,18 +164,14 @@ async function dmGetEnv(key, def) {
 
             v = dmTrim(v)
 
-            if (v !== '') {
-                return v
-            }
+            if (v !== '') return v
         }
     } catch (e) {}
 
     return def
 }
 
-async function dmGetApiBase() {
-    let base = await dmGetEnv('DANMU_API_BASE', '')
-
+function dmNormalizeApiBase(base) {
     base = dmTrim(base)
 
     base = base.replace(/^['"]+|['"]+$/g, '')
@@ -202,20 +191,98 @@ async function dmGetApiBase() {
     return base
 }
 
+/**
+ * 解析多 API 环境变量
+ *
+ * 推荐格式：
+ * aws@https://xxx/密钥|韩@https://xxx/密钥
+ *
+ * 兼容：
+ * https://xxx/密钥
+ */
+async function dmGetApiList() {
+    let raw = await dmGetEnv('DANMU_API_LIST', '')
+
+    // 兼容旧变量
+    if (!raw) {
+        raw = await dmGetEnv('DANMU_API_BASE', '')
+    }
+
+    raw = dmTrim(raw)
+
+    const list = []
+
+    if (!raw) return list
+
+    const parts = raw.split('|')
+
+    for (let i = 0; i < parts.length; i++) {
+        const item = dmTrim(parts[i])
+
+        if (!item) continue
+
+        let name = ''
+        let url = ''
+
+        const atIndex = item.indexOf('@')
+
+        if (atIndex > 0) {
+            name = dmTrim(item.substring(0, atIndex))
+            url = dmTrim(item.substring(atIndex + 1))
+        } else {
+            name = '线路' + (list.length + 1)
+            url = item
+        }
+
+        url = dmNormalizeApiBase(url)
+
+        if (name && url && url.indexOf('http') === 0) {
+            list.push({
+                name: name,
+                url: url
+            })
+        }
+    }
+
+    return list
+}
+
+/**
+ * 根据 UZ 传入的 line 选择 API。
+ * 如果没传 line，默认第一个。
+ */
+async function dmSelectApi(line) {
+    const list = await dmGetApiList()
+
+    if (!list || list.length === 0) {
+        return null
+    }
+
+    line = dmTrim(line)
+
+    if (line) {
+        for (let i = 0; i < list.length; i++) {
+            if (list[i].name === line) {
+                return list[i]
+            }
+        }
+    }
+
+    return list[0]
+}
+
 async function dmGetMaxCount() {
     const value = await dmGetEnv('DANMU_MAX_COUNT', String(DANMU_MAX_COUNT_DEFAULT))
     const n = parseInt(value, 10)
 
-    if (isNaN(n) || n <= 0) {
-        return DANMU_MAX_COUNT_DEFAULT
-    }
+    if (isNaN(n) || n <= 0) return DANMU_MAX_COUNT_DEFAULT
 
     return n
 }
 
 /**
  * ==========================
- * 剧名与集数识别
+ * 剧名 / 集数识别
  * ==========================
  */
 
@@ -237,9 +304,6 @@ function dmGetName(item) {
     return name
 }
 
-/**
- * 从路径或 URL 中取最后一级文件名
- */
 function dmGetBaseNameFromUrl(text) {
     text = dmTrim(text)
 
@@ -256,14 +320,10 @@ function dmGetBaseNameFromUrl(text) {
     return arr[arr.length - 1] || text
 }
 
-/**
- * 判断数字是否像集数
- */
 function dmIsLikelyEpisodeNumber(n) {
     n = parseInt(n, 10)
 
     if (isNaN(n) || n <= 0) return false
-
     if (n > 2000) return false
 
     const badNums = [
@@ -272,15 +332,11 @@ function dmIsLikelyEpisodeNumber(n) {
     ]
 
     if (badNums.indexOf(n) >= 0) return false
-
     if (n >= 1900 && n <= 2099) return false
 
     return true
 }
 
-/**
- * 从文本、文件名、播放地址中提取真实集数
- */
 function dmExtractEpisodeFromText(text, seriesName) {
     text = dmTrim(text)
 
@@ -318,17 +374,10 @@ function dmExtractEpisodeFromText(text, seriesName) {
             if (m && m[1]) {
                 const n = parseInt(m[1], 10)
 
-                if (dmIsLikelyEpisodeNumber(n)) {
-                    return n
-                }
+                if (dmIsLikelyEpisodeNumber(n)) return n
             }
         }
 
-        /**
-         * 特殊处理：
-         * 仙逆137
-         * 剑来05
-         */
         if (seriesName) {
             const safeName = dmTrim(seriesName).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
             const re = new RegExp(safeName + '\\s*0*(\\d{1,4})', 'i')
@@ -337,25 +386,17 @@ function dmExtractEpisodeFromText(text, seriesName) {
             if (m2 && m2[1]) {
                 const n2 = parseInt(m2[1], 10)
 
-                if (dmIsLikelyEpisodeNumber(n2)) {
-                    return n2
-                }
+                if (dmIsLikelyEpisodeNumber(n2)) return n2
             }
         }
 
-        /**
-         * 最后兜底：
-         * 文件名里的最后一个合理数字
-         */
         const allNums = s.match(/\d{1,4}/g)
 
         if (allNums && allNums.length > 0) {
             for (let j = allNums.length - 1; j >= 0; j--) {
                 const n3 = parseInt(allNums[j], 10)
 
-                if (dmIsLikelyEpisodeNumber(n3)) {
-                    return n3
-                }
+                if (dmIsLikelyEpisodeNumber(n3)) return n3
             }
         }
     }
@@ -363,26 +404,9 @@ function dmExtractEpisodeFromText(text, seriesName) {
     return 0
 }
 
-/**
- * 获取集数并返回来源
- *
- * 返回：
- * {
- *   episode: 137,
- *   source: 'videoUrl',
- *   raw: '仙逆137.mp4'
- * }
- */
 function dmGetEpisodeInfo(item) {
     const seriesName = dmGetName(item)
 
-    /**
-     * 1. 优先从 videoUrl 获取。
-     *
-     * 这个字段可以作为手动覆盖字段：
-     * - 填 137
-     * - 填 仙逆137.mp4
-     */
     const videoUrl = dmPick(item, ['videoUrl'], '')
     const epFromVideoUrl = dmExtractEpisodeFromText(videoUrl, seriesName)
 
@@ -394,9 +418,6 @@ function dmGetEpisodeInfo(item) {
         }
     }
 
-    /**
-     * 2. 从 danEpisode 获取
-     */
     try {
         if (item && item.danEpisode) {
             const epText =
@@ -416,9 +437,6 @@ function dmGetEpisodeInfo(item) {
         }
     } catch (e) {}
 
-    /**
-     * 3. 从 danVideo 获取
-     */
     try {
         if (item && item.danVideo) {
             const videoText =
@@ -438,9 +456,6 @@ function dmGetEpisodeInfo(item) {
         }
     } catch (e2) {}
 
-    /**
-     * 4. 从其它标题字段获取
-     */
     const title = dmTrim(dmPick(item, [
         'subTitle',
         'episodeName',
@@ -459,9 +474,6 @@ function dmGetEpisodeInfo(item) {
         }
     }
 
-    /**
-     * 5. 最后才使用 UZ 给的 episode
-     */
     let ep = dmPick(item, [
         'episode',
         'episodeIndex',
@@ -507,9 +519,7 @@ function dmGetSeason(item) {
         if (m) {
             const n = parseInt(m[0], 10)
 
-            if (!isNaN(n) && n > 0) {
-                return String(n)
-            }
+            if (!isNaN(n) && n > 0) return String(n)
         }
     }
 
@@ -518,7 +528,7 @@ function dmGetSeason(item) {
 
 /**
  * ==========================
- * 网络与 JSON
+ * 网络
  * ==========================
  */
 
@@ -536,31 +546,20 @@ function dmParseJson(text) {
 function dmNormalizeResponse(res) {
     if (res === undefined || res === null) return ''
 
-    if (typeof res === 'string') {
-        return res
-    }
+    if (typeof res === 'string') return res
 
     if (res.data !== undefined) {
-        if (typeof res.data === 'string') {
-            return res.data
-        }
-
+        if (typeof res.data === 'string') return res.data
         return JSON.stringify(res.data)
     }
 
     if (res.body !== undefined) {
-        if (typeof res.body === 'string') {
-            return res.body
-        }
-
+        if (typeof res.body === 'string') return res.body
         return JSON.stringify(res.body)
     }
 
     if (res.content !== undefined) {
-        if (typeof res.content === 'string') {
-            return res.content
-        }
-
+        if (typeof res.content === 'string') return res.content
         return JSON.stringify(res.content)
     }
 
@@ -600,6 +599,33 @@ async function dmHttpPostJson(url, body) {
  * ==========================
  */
 
+function dmPickAnimeList(json) {
+    if (!json) return []
+
+    if (dmIsArray(json)) return json
+    if (dmIsArray(json.animes)) return json.animes
+    if (dmIsArray(json.data)) return json.data
+    if (json.data && dmIsArray(json.data.animes)) return json.data.animes
+    if (json.result && dmIsArray(json.result)) return json.result
+    if (json.result && dmIsArray(json.result.animes)) return json.result.animes
+    if (json.bangumi && dmIsArray(json.bangumi)) return json.bangumi
+
+    return []
+}
+
+function dmPickEpisodeList(json) {
+    if (!json) return []
+
+    if (dmIsArray(json.episodes)) return json.episodes
+    if (dmIsArray(json.data)) return json.data
+    if (json.data && dmIsArray(json.data.episodes)) return json.data.episodes
+    if (json.result && dmIsArray(json.result.episodes)) return json.result.episodes
+    if (json.anime && dmIsArray(json.anime.episodes)) return json.anime.episodes
+    if (json.bangumi && dmIsArray(json.bangumi.episodes)) return json.bangumi.episodes
+
+    return []
+}
+
 function dmExtractEpisodeId(matchJson) {
     if (!matchJson) return ''
 
@@ -630,7 +656,7 @@ function dmExtractEpisodeId(matchJson) {
     return ''
 }
 
-function dmBuildMatchToast(matchJson, episodeInfo) {
+function dmBuildMatchToast(matchJson, episodeInfo, apiItem) {
     if (!matchJson) return ''
 
     if (
@@ -646,7 +672,8 @@ function dmBuildMatchToast(matchJson, episodeInfo) {
         const episodeTitle = item.episodeTitle || ''
         const episodeId = item.episodeId || item.commentId || item.id || ''
 
-        let tip = '识别集数：第' + episodeInfo.episode + '集'
+        let tip = 'API：' + (apiItem ? apiItem.name : '') +
+            '\n识别集数：第' + episodeInfo.episode + '集'
 
         if (episodeInfo.source === 'uzEpisode') {
             tip += '\n来源：UZ传入集数，可能不准'
@@ -662,17 +689,9 @@ function dmBuildMatchToast(matchJson, episodeInfo) {
             tip += '\n匹配：'
         }
 
-        if (animeTitle) {
-            tip += animeTitle
-        }
-
-        if (episodeTitle) {
-            tip += ' - ' + episodeTitle
-        }
-
-        if (episodeId) {
-            tip += '\nID：' + episodeId
-        }
+        if (animeTitle) tip += animeTitle
+        if (episodeTitle) tip += ' - ' + episodeTitle
+        if (episodeId) tip += '\nID：' + episodeId
 
         return tip
     }
@@ -685,9 +704,7 @@ function dmConvertColor(color) {
         return '16777215'
     }
 
-    color = dmTrim(color)
-
-    return color
+    return dmTrim(color)
 }
 
 async function dmConvertComments(commentJson) {
@@ -697,9 +714,7 @@ async function dmConvertComments(commentJson) {
 
     const comments = commentJson.comments
 
-    if (!comments || !dmIsArray(comments)) {
-        return result
-    }
+    if (!comments || !dmIsArray(comments)) return result
 
     const maxCount = await dmGetMaxCount()
 
@@ -721,13 +736,8 @@ async function dmConvertComments(commentJson) {
         if (item.p !== undefined && item.p !== null) {
             const parts = String(item.p).split(',')
 
-            if (parts.length > 0) {
-                time = parseFloat(parts[0])
-            }
-
-            if (parts.length > 2) {
-                color = parts[2]
-            }
+            if (parts.length > 0) time = parseFloat(parts[0])
+            if (parts.length > 2) color = parts[2]
         } else {
             if (item.t !== undefined) {
                 time = parseFloat(item.t)
@@ -738,9 +748,7 @@ async function dmConvertComments(commentJson) {
             color = item.color || '16777215'
         }
 
-        if (isNaN(time)) {
-            time = 0
-        }
+        if (isNaN(time)) time = 0
 
         const dan = new DanMu()
         dan.content = content
@@ -753,59 +761,296 @@ async function dmConvertComments(commentJson) {
     return result
 }
 
+async function dmGetCommentsByEpisodeId(apiBase, episodeId) {
+    const commentUrl =
+        apiBase +
+        '/api/v2/comment/' +
+        encodeURIComponent(episodeId) +
+        '?format=json&duration=true'
+
+    const commentText = await dmHttpGet(commentUrl)
+    const commentJson = dmParseJson(commentText)
+
+    if (!commentJson) {
+        return {
+            data: [],
+            error: 'comment 接口返回不是 JSON：' + String(commentText).substring(0, 200)
+        }
+    }
+
+    const all = await dmConvertComments(commentJson)
+
+    return {
+        data: all,
+        error: ''
+    }
+}
+
 /**
  * ==========================
- * UZ type:400 全局函数
+ * UZ type:400
  * ==========================
  */
 
 async function getLines() {
+    const apiList = await dmGetApiList()
+
+    const lines = []
+
+    for (let i = 0; i < apiList.length; i++) {
+        lines.push(apiList[i].name)
+    }
+
     return formatBackData({
-        lines: [
-            '自动匹配'
-        ],
-        error: '',
+        lines: lines,
+        error: lines.length > 0 ? '' : '请配置 DANMU_API_LIST'
     })
 }
 
 async function getVideoPlatformList() {
+    const p = new DanVideoPlatform()
+    p.name = 'danmu_api'
+    p.isLineSwitchSupported = true
+
     return formatBackData({
-        data: [],
+        data: [p],
         error: '',
     })
 }
 
 async function getVideoList(args) {
-    return formatBackData({
+    const back = {
         data: [],
         error: '',
-    })
+    }
+
+    try {
+        const apiItem = await dmSelectApi(args ? args.line : '')
+        if (!apiItem) {
+            back.error = '请配置 DANMU_API_LIST'
+            return formatBackData(back)
+        }
+
+        const name = dmGetName(args)
+
+        if (!name) {
+            back.error = '缺少搜索名称'
+            return formatBackData(back)
+        }
+
+        const url =
+            apiItem.url +
+            '/api/v2/search/anime?keyword=' +
+            encodeURIComponent(name)
+
+        const text = await dmHttpGet(url)
+        const json = dmParseJson(text)
+
+        if (!json) {
+            back.error = '搜索接口返回不是 JSON：' + String(text).substring(0, 200)
+            return formatBackData(back)
+        }
+
+        const list = dmPickAnimeList(json)
+
+        for (let i = 0; i < list.length; i++) {
+            const item = list[i]
+
+            if (!item) continue
+
+            const animeId =
+                item.animeId ||
+                item.id ||
+                item.bangumiId ||
+                item.mediaId
+
+            const title =
+                item.animeTitle ||
+                item.title ||
+                item.name ||
+                item.vod_name ||
+                ''
+
+            if (!animeId || !title) continue
+
+            const v = new DanVideo()
+            v.vod_name = title
+            v.vod_remarks =
+                item.type ||
+                item.typeDescription ||
+                item.desc ||
+                item.year ||
+                ''
+
+            v.vod_pic =
+                item.imageUrl ||
+                item.image ||
+                item.cover ||
+                item.pic ||
+                ''
+
+            v.extData = {
+                animeId: animeId,
+                apiName: apiItem.name,
+                apiBase: apiItem.url,
+                raw: item
+            }
+
+            back.data.push(v)
+        }
+    } catch (e) {
+        back.error = e.toString()
+    }
+
+    return formatBackData(back)
 }
 
 async function getVideoEpisodes(args) {
-    return formatBackData({
+    const back = {
         data: [],
         error: '',
-    })
+    }
+
+    try {
+        let apiBase = ''
+        let apiName = ''
+
+        if (
+            args &&
+            args.danVideo &&
+            args.danVideo.extData &&
+            args.danVideo.extData.apiBase
+        ) {
+            apiBase = args.danVideo.extData.apiBase
+            apiName = args.danVideo.extData.apiName || ''
+        } else {
+            const apiItem = await dmSelectApi(args ? args.line : '')
+            if (apiItem) {
+                apiBase = apiItem.url
+                apiName = apiItem.name
+            }
+        }
+
+        if (!apiBase) {
+            back.error = '请配置 DANMU_API_LIST'
+            return formatBackData(back)
+        }
+
+        if (
+            !args ||
+            !args.danVideo ||
+            !args.danVideo.extData ||
+            !args.danVideo.extData.animeId
+        ) {
+            back.error = '缺少 animeId'
+            return formatBackData(back)
+        }
+
+        const animeId = args.danVideo.extData.animeId
+        const url = apiBase + '/api/v2/bangumi/' + encodeURIComponent(animeId)
+
+        const text = await dmHttpGet(url)
+        const json = dmParseJson(text)
+
+        if (!json) {
+            back.error = '剧集接口返回不是 JSON：' + String(text).substring(0, 200)
+            return formatBackData(back)
+        }
+
+        const episodes = dmPickEpisodeList(json)
+
+        for (let i = 0; i < episodes.length; i++) {
+            const ep = episodes[i]
+
+            if (!ep) continue
+
+            const episodeId =
+                ep.episodeId ||
+                ep.commentId ||
+                ep.episodeID ||
+                ep.commentID ||
+                ep.id ||
+                ep.cid
+
+            const title =
+                ep.episodeTitle ||
+                ep.title ||
+                ep.name ||
+                ep.vod_name ||
+                ('第' + (i + 1) + '集')
+
+            if (!episodeId) continue
+
+            const d = new DanEpisode()
+            d.vod_name = title
+            d.vod_remarks = apiName ? ('API：' + apiName) : title
+            d.extData = {
+                episodeId: episodeId,
+                apiName: apiName,
+                apiBase: apiBase,
+                raw: ep
+            }
+
+            back.data.push(d)
+        }
+    } catch (e) {
+        back.error = e.toString()
+    }
+
+    return formatBackData(back)
 }
 
 async function searchDanMu(item) {
     let backData = new BackData()
 
     try {
-        if (!item) {
-            item = {}
-        }
+        if (!item) item = {}
 
-        const apiBase = await dmGetApiBase()
+        /**
+         * 手动精准选集优先
+         */
+        if (
+            item.danEpisode &&
+            item.danEpisode.extData &&
+            item.danEpisode.extData.episodeId
+        ) {
+            const episodeId = item.danEpisode.extData.episodeId
+            const apiBase = item.danEpisode.extData.apiBase || ''
+            const apiName = item.danEpisode.extData.apiName || ''
 
-        if (!apiBase) {
-            backData.error = '请先配置环境变量 DANMU_API_BASE'
+            if (!apiBase) {
+                backData.error = '手动选集缺少 apiBase'
+                return formatBackData(backData)
+            }
+
+            dmShowToast(
+                '手动选集\nAPI：' +
+                apiName +
+                '\n' +
+                (item.danEpisode.vod_name || '') +
+                '\nID：' +
+                episodeId
+            )
+
+            const ret = await dmGetCommentsByEpisodeId(apiBase, episodeId)
+
+            backData.data = ret.data
+            backData.error = ret.error
+
+            if (backData.data.length === 0 && !backData.error) {
+                backData.error = '未找到弹幕'
+            }
+
             return formatBackData(backData)
         }
 
-        if (apiBase.indexOf('http') !== 0) {
-            backData.error = 'DANMU_API_BASE 读取值异常：' + apiBase
+        /**
+         * 自动匹配
+         */
+        const apiItem = await dmSelectApi(item.line || '')
+
+        if (!apiItem) {
+            backData.error = '请配置 DANMU_API_LIST'
             return formatBackData(backData)
         }
 
@@ -832,13 +1077,17 @@ async function searchDanMu(item) {
 
         if (episodeInfo.source === 'uzEpisode') {
             dmShowToast(
-                '未拿到真实文件名\n使用 UZ 集数：第' +
+                'API：' +
+                apiItem.name +
+                '\n未拿到真实文件名\n使用 UZ 集数：第' +
                 episode +
-                '集\n如果不准，可在视频平台剧集链接框填真实集数'
+                '集\n如不准，请使用手动搜索选集'
             )
         } else {
             dmShowToast(
-                '自动识别集数：第' +
+                'API：' +
+                apiItem.name +
+                '\n自动识别集数：第' +
                 episode +
                 '集\n来源：' +
                 episodeInfo.source
@@ -858,7 +1107,7 @@ async function searchDanMu(item) {
             seasonNumber: season
         }
 
-        const matchUrl = apiBase + '/api/v2/match'
+        const matchUrl = apiItem.url + '/api/v2/match'
 
         const matchText = await dmHttpPostJson(matchUrl, matchBody)
         const matchJson = dmParseJson(matchText)
@@ -880,26 +1129,13 @@ async function searchDanMu(item) {
             return formatBackData(backData)
         }
 
-        const matchToast = dmBuildMatchToast(matchJson, episodeInfo)
+        const matchToast = dmBuildMatchToast(matchJson, episodeInfo, apiItem)
         dmShowToast(matchToast)
 
-        const commentUrl =
-            apiBase +
-            '/api/v2/comment/' +
-            encodeURIComponent(episodeId) +
-            '?format=json&duration=true'
+        const ret = await dmGetCommentsByEpisodeId(apiItem.url, episodeId)
 
-        const commentText = await dmHttpGet(commentUrl)
-        const commentJson = dmParseJson(commentText)
-
-        if (!commentJson) {
-            backData.error = 'comment 接口返回不是 JSON：' + String(commentText).substring(0, 200)
-            return formatBackData(backData)
-        }
-
-        const all = await dmConvertComments(commentJson)
-
-        backData.data = all
+        backData.data = ret.data
+        backData.error = ret.error
     } catch (error) {
         backData.error = error.toString()
     }
