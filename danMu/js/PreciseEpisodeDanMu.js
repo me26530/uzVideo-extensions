@@ -1,7 +1,7 @@
 // ignore
 //@name:danmu_api自动匹配
 // 版本号纯数字
-//@version:18
+//@version:19
 // 备注，没有的话就不填
 //@remark:接入 huangxd-/danmu_api，自动匹配弹幕，不走 FongMi，环境变量版，带匹配提示
 // 加密 id，没有的话就不填
@@ -168,12 +168,11 @@ function dmPick(obj, keys, def) {
 /**
  * 读取环境变量
  *
- * 这里只使用 getEnv(key)，避免触发：
- * “未在配置文件中声明环境变量，读取失败”
+ * UZ type:400 需要使用 appConfig.uzTag 读取扩展环境变量。
  */
 async function dmGetEnv(key, def) {
     try {
-        let v = await getEnv(key)
+        let v = await getEnv(appConfig.uzTag, key)
 
         if (v !== undefined && v !== null) {
             if (typeof v === 'object') {
@@ -198,6 +197,7 @@ async function dmGetEnv(key, def) {
 
     return def
 }
+
 
 /**
  * 获取 danmu_api 基础地址
