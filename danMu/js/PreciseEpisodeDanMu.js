@@ -1,13 +1,13 @@
 // ignore
 //@name:自动弹幕
 // 版本号纯数字
-//@version:27
+//@version:28
 // 备注，没有的话就不填
 //@remark:接入 huangxd-/danmu_api，支持多API线路、自动匹配和手动精准选集，不走 FongMi
 // 加密 id，没有的话就不填
 //@codeID:
 // 使用的环境变量，没有的话就不填
-//@env:DANMU_API_LIST##多API列表，格式 aws@https://xxx/密钥|韩@https://xxx/密钥&&DANMU_MAX_COUNT##最大弹幕数量，默认8000
+//@env:自动匹配api##多API列表，格式 aws@https://xxx/密钥|韩@https://xxx/密钥&&DANMU_MAX_COUNT##最大弹幕数量，默认8000
 // 是否是AV 1是  0否
 //@isAV:0
 //是否弃用 1是  0否
@@ -182,16 +182,16 @@ function dmNormalizeApiBase(base) {
     return base
 }
 
-/**
- * 解析多 API
- *
- * DANMU_API_LIST:
- * aws@https://xxx/密钥|韩@https://xxx/密钥
- */
 async function dmGetApiList() {
-    let raw = await dmGetEnv('DANMU_API_LIST', '')
+    // 新变量名：自动匹配API
+    let raw = await dmGetEnv('自动匹配API', '')
 
-    // 兼容旧环境变量
+    // 兼容旧变量名 DANMU_API_LIST
+    if (!raw) {
+        raw = await dmGetEnv('DANMU_API_LIST', '')
+    }
+
+    // 兼容更旧的单 API 变量 DANMU_API_BASE
     if (!raw) {
         raw = await dmGetEnv('DANMU_API_BASE', '')
     }
@@ -233,6 +233,7 @@ async function dmGetApiList() {
 
     return list
 }
+
 
 /**
  * 根据 line 或 videoPlatformName 选择 API
