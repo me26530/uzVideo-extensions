@@ -1,7 +1,7 @@
 // ignore
 //@name:danmu_api自动匹配
 // 版本号纯数字
-//@version:12
+//@version:13
 // 备注，没有的话就不填
 //@remark:接入 huangxd-/danmu_api，自动匹配弹幕，不走 FongMi
 // 加密 id，没有的话就不填
@@ -42,10 +42,6 @@ import {
 
 const appConfig = {
     _uzTag: '',
-    /**
-     * 扩展标识，初次加载时，uz 会自动赋值，请勿修改
-     * 用于读取环境变量
-     */
     get uzTag() {
         return this._uzTag
     },
@@ -132,9 +128,10 @@ class DanVideo extends DanEpisode {
  * ==========================
  */
 
+// 这里已经写死你的 danmu_api 地址
 const DANMU_API_BASE = 'https://5m36yzdvtmqcrkubdau5axe5lu0qrizy.lambda-url.ap-northeast-1.on.aws/1105074072'
 
-// 为避免一次返回 1w+ 弹幕导致播放器卡顿，默认限制 8000 条
+// 最大弹幕数量，避免一次加载 1w+ 导致播放器卡顿
 const DANMU_MAX_COUNT = 8000
 
 /**
@@ -162,6 +159,7 @@ function dmPick(obj, keys, def) {
 
     for (let i = 0; i < keys.length; i++) {
         const k = keys[i]
+
         if (obj[k] !== undefined && obj[k] !== null && dmTrim(obj[k]) !== '') {
             return obj[k]
         }
@@ -281,6 +279,9 @@ function dmNormalizeResponse(res) {
     return JSON.stringify(res)
 }
 
+/**
+ * GET 请求
+ */
 async function dmHttpGet(url) {
     const res = await req(url, {
         method: 'GET',
@@ -293,7 +294,16 @@ async function dmHttpGet(url) {
     return dmNormalizeResponse(res)
 }
 
+/**
+ * POST JSON 请求
+ *
+ * 重要：
+ * uz 的 req POST 请求体使用 data，不使用 body。
+ * 否则 danmu_api 会返回 Invalid JSON body。
+ */
 async function dmHttpPostJson(url, body) {
+    const payload = JSON.stringify(body || {})
+
     const res = await req(url, {
         method: 'POST',
         headers: {
@@ -301,7 +311,7 @@ async function dmHttpPostJson(url, body) {
             'Accept': 'application/json,text/plain,*/*',
             'Content-Type': 'application/json'
         },
-        body: JSON.stringify(body || {})
+        data: payload
     })
 
     return dmNormalizeResponse(res)
@@ -343,8 +353,7 @@ function dmConvertColor(color) {
 
     color = dmTrim(color)
 
-    // 官方模板说明 color 支持 10 进制 / 16 进制
-    // danmu_api 返回的是 10 进制，如 16777215，所以这里直接保留
+    // danmu_api 返回的颜色本身就是 10 进制，如 16777215
     return color
 }
 
