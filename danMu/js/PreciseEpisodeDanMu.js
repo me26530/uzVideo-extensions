@@ -1,7 +1,7 @@
 // ignore
 //@name:自动弹幕
 // 版本号纯数字
-//@version:26
+//@version:27
 // 备注，没有的话就不填
 //@remark:接入 huangxd-/danmu_api，支持多API线路、自动匹配和手动精准选集，不走 FongMi
 // 加密 id，没有的话就不填
