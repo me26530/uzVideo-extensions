@@ -1,9 +1,9 @@
 // ignore
 //@name:danmu_api自动匹配
 // 版本号纯数字
-//@version:22
+//@version:23
 // 备注，没有的话就不填
-//@remark:接入 huangxd-/danmu_api，自动匹配弹幕，不走 FongMi，优先从文件名识别真实集数
+//@remark:接入 huangxd-/danmu_api，自动匹配弹幕，不走 FongMi，判断真实集数来源
 // 加密 id，没有的话就不填
 //@codeID:
 // 使用的环境变量，没有的话就不填
@@ -98,10 +98,6 @@ class DanVideo extends DanEpisode {
     }
 }
 
-/**
- * 默认最大弹幕数
- * 可通过环境变量 DANMU_MAX_COUNT 覆盖
- */
 const DANMU_MAX_COUNT_DEFAULT = 8000
 
 /**
@@ -219,7 +215,7 @@ async function dmGetMaxCount() {
 
 /**
  * ==========================
- * 剧名与真实集数识别
+ * 剧名与集数识别
  * ==========================
  */
 
@@ -242,7 +238,7 @@ function dmGetName(item) {
 }
 
 /**
- * 从路径或 URL 中取文件名
+ * 从路径或 URL 中取最后一级文件名
  */
 function dmGetBaseNameFromUrl(text) {
     text = dmTrim(text)
@@ -262,7 +258,6 @@ function dmGetBaseNameFromUrl(text) {
 
 /**
  * 判断数字是否像集数
- * 避免把 3840、1632、1080、2160、2024 之类识别成集数。
  */
 function dmIsLikelyEpisodeNumber(n) {
     n = parseInt(n, 10)
@@ -284,17 +279,7 @@ function dmIsLikelyEpisodeNumber(n) {
 }
 
 /**
- * 从文本、文件名、播放地址中提取真实集数。
- *
- * 支持：
- * 仙逆137.mp4
- * 仙逆_137
- * 仙逆-137
- * 仙逆 第137集
- * S01E137
- * EP137
- * E137
- * videoUrl: "5"
+ * 从文本、文件名、播放地址中提取真实集数
  */
 function dmExtractEpisodeFromText(text, seriesName) {
     text = dmTrim(text)
@@ -360,8 +345,7 @@ function dmExtractEpisodeFromText(text, seriesName) {
 
         /**
          * 最后兜底：
-         * 取文件名里的最后一个合理数字。
-         * 例如：仙逆137 -> 137
+         * 文件名里的最后一个合理数字
          */
         const allNums = s.match(/\d{1,4}/g)
 
@@ -380,33 +364,38 @@ function dmExtractEpisodeFromText(text, seriesName) {
 }
 
 /**
- * 获取真实集数
+ * 获取集数并返回来源
  *
- * 优先级：
- * 1. videoUrl / 文件名 / 播放路径
- * 2. danEpisode / danVideo 名称
- * 3. UZ 给的 episode
- * 4. 其它标题字段
- * 5. 默认 1
+ * 返回：
+ * {
+ *   episode: 137,
+ *   source: 'videoUrl',
+ *   raw: '仙逆137.mp4'
+ * }
  */
-function dmGetEpisode(item) {
+function dmGetEpisodeInfo(item) {
     const seriesName = dmGetName(item)
 
     /**
-     * 第一优先级：从 videoUrl 或播放文件名识别
+     * 1. 优先从 videoUrl 获取。
+     *
+     * 这个字段可以作为手动覆盖字段：
+     * - 填 137
+     * - 填 仙逆137.mp4
      */
-    const videoUrl = dmPick(item, [
-        'videoUrl'
-    ], '')
-
+    const videoUrl = dmPick(item, ['videoUrl'], '')
     const epFromVideoUrl = dmExtractEpisodeFromText(videoUrl, seriesName)
 
     if (epFromVideoUrl > 0) {
-        return String(epFromVideoUrl)
+        return {
+            episode: epFromVideoUrl,
+            source: 'videoUrl',
+            raw: videoUrl
+        }
     }
 
     /**
-     * 第二优先级：从 danEpisode 里识别
+     * 2. 从 danEpisode 获取
      */
     try {
         if (item && item.danEpisode) {
@@ -418,13 +407,17 @@ function dmGetEpisode(item) {
             const epFromDanEpisode = dmExtractEpisodeFromText(epText, seriesName)
 
             if (epFromDanEpisode > 0) {
-                return String(epFromDanEpisode)
+                return {
+                    episode: epFromDanEpisode,
+                    source: 'danEpisode',
+                    raw: epText
+                }
             }
         }
     } catch (e) {}
 
     /**
-     * 第二优先级：从 danVideo 里识别
+     * 3. 从 danVideo 获取
      */
     try {
         if (item && item.danVideo) {
@@ -436,14 +429,38 @@ function dmGetEpisode(item) {
             const epFromDanVideo = dmExtractEpisodeFromText(videoText, seriesName)
 
             if (epFromDanVideo > 0) {
-                return String(epFromDanVideo)
+                return {
+                    episode: epFromDanVideo,
+                    source: 'danVideo',
+                    raw: videoText
+                }
             }
         }
     } catch (e2) {}
 
     /**
-     * 第三优先级：UZ 给的 episode
-     * 仅 episode > 0 时使用
+     * 4. 从其它标题字段获取
+     */
+    const title = dmTrim(dmPick(item, [
+        'subTitle',
+        'episodeName',
+        'playName',
+        'urlName',
+        'vod_play_name'
+    ], ''))
+
+    const epFromTitle = dmExtractEpisodeFromText(title, seriesName)
+
+    if (epFromTitle > 0) {
+        return {
+            episode: epFromTitle,
+            source: 'title',
+            raw: title
+        }
+    }
+
+    /**
+     * 5. 最后才使用 UZ 给的 episode
      */
     let ep = dmPick(item, [
         'episode',
@@ -461,30 +478,20 @@ function dmGetEpisode(item) {
             const n = parseInt(m[0], 10)
 
             if (!isNaN(n) && n > 0) {
-                return String(n)
+                return {
+                    episode: n,
+                    source: 'uzEpisode',
+                    raw: ep
+                }
             }
         }
     }
 
-    /**
-     * 第四优先级：其它字段
-     */
-    const title = dmTrim(dmPick(item, [
-        'subTitle',
-        'episodeName',
-        'playName',
-        'urlName',
-        'vod_play_name',
-        'line'
-    ], ''))
-
-    const epFromTitle = dmExtractEpisodeFromText(title, seriesName)
-
-    if (epFromTitle > 0) {
-        return String(epFromTitle)
+    return {
+        episode: 1,
+        source: 'default',
+        raw: ''
     }
-
-    return '1'
 }
 
 function dmGetSeason(item) {
@@ -572,10 +579,6 @@ async function dmHttpGet(url) {
     return dmNormalizeResponse(res)
 }
 
-/**
- * 已验证：
- * UZ req 对 danmu_api /api/v2/match 使用 data: 对象可正常请求。
- */
 async function dmHttpPostJson(url, body) {
     const res = await req(url, {
         method: 'POST',
@@ -627,7 +630,7 @@ function dmExtractEpisodeId(matchJson) {
     return ''
 }
 
-function dmBuildMatchToast(matchJson, requestName, requestEpisode) {
+function dmBuildMatchToast(matchJson, episodeInfo) {
     if (!matchJson) return ''
 
     if (
@@ -643,7 +646,17 @@ function dmBuildMatchToast(matchJson, requestName, requestEpisode) {
         const episodeTitle = item.episodeTitle || ''
         const episodeId = item.episodeId || item.commentId || item.id || ''
 
-        let tip = '识别集数：第' + requestEpisode + '集'
+        let tip = '识别集数：第' + episodeInfo.episode + '集'
+
+        if (episodeInfo.source === 'uzEpisode') {
+            tip += '\n来源：UZ传入集数，可能不准'
+        } else {
+            tip += '\n来源：' + episodeInfo.source
+        }
+
+        if (episodeInfo.raw) {
+            tip += '\n原始值：' + String(episodeInfo.raw).substring(0, 30)
+        }
 
         if (animeTitle || episodeTitle) {
             tip += '\n匹配：'
@@ -798,7 +811,14 @@ async function searchDanMu(item) {
 
         const name = dmGetName(item)
 
-        let episode = parseInt(dmGetEpisode(item), 10)
+        if (!name) {
+            backData.error = '缺少影片名称'
+            return formatBackData(backData)
+        }
+
+        const episodeInfo = dmGetEpisodeInfo(item)
+
+        let episode = parseInt(episodeInfo.episode, 10)
 
         if (isNaN(episode) || episode <= 0) {
             episode = 1
@@ -810,13 +830,20 @@ async function searchDanMu(item) {
             season = 1
         }
 
-        if (!name) {
-            backData.error = '缺少影片名称'
-            return formatBackData(backData)
+        if (episodeInfo.source === 'uzEpisode') {
+            dmShowToast(
+                '未拿到真实文件名\n使用 UZ 集数：第' +
+                episode +
+                '集\n如果不准，可在视频平台剧集链接框填真实集数'
+            )
+        } else {
+            dmShowToast(
+                '自动识别集数：第' +
+                episode +
+                '集\n来源：' +
+                episodeInfo.source
+            )
         }
-
-        // 显示识别出来的真实集数，便于确认是否绕过 UZ 错误集数
-        dmShowToast('自动识别集数：第' + episode + '集')
 
         const keyword = name + ' S' + dmPad2(season) + 'E' + dmPad2(episode)
 
@@ -853,7 +880,7 @@ async function searchDanMu(item) {
             return formatBackData(backData)
         }
 
-        const matchToast = dmBuildMatchToast(matchJson, name, episode)
+        const matchToast = dmBuildMatchToast(matchJson, episodeInfo)
         dmShowToast(matchToast)
 
         const commentUrl =
